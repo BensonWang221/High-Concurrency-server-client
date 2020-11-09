@@ -1,4 +1,13 @@
-﻿#ifdef _WIN32
+﻿/*==================================================================================================
+   Date                        Description of Change
+09-Nov-2020           1. First version
+09-Nov-2020           2. ①针对Linux在遍历返回的fd_set时，不再每次遍历获取maxFd，而是保存maxFd，在新加或删除时更新maxFd
+                         ②注意vector/deque在用iterator遍历时，不能随便erase，注意迭代器陷阱！erase后续iterator失效！！
+
+$$HISTORY$$
+====================================================================================================*/
+
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <WinSock2.h>
@@ -80,7 +89,7 @@ int handleMsg(SOCKET _clientSock)
 
 	if ((cmdLen = recv(_clientSock, recvBuf, sizeof(DataHeader), 0)) <= 0)
 	{
-		printf("Client has logged off\n");
+		printf("Client<%d> has logged off\n", _clientSock);
 		return -1;
 	}
 
@@ -223,7 +232,9 @@ int main()
 		}
 #else
 		// For Linux, fd_set is different, so need to go through all clients
-		for (auto sock : g_clients)
+		// 为了不在每次clientSock退出时再find遍历一遍，做一下改进
+		// 注意！！！！此处要注意vector在erase时的迭代器陷阱！！！
+		/*for (auto sock : g_clients)
 		{
 			if (FD_ISSET(sock, &readFds))
 			{
@@ -240,6 +251,20 @@ int main()
 					}
 				}
 			}
+		}*/
+
+		for (auto iter = g_clients.begin(); iter != g_clients.end(); )
+		{
+			if (FD_ISSET(*iter, &readFds))
+			{
+				if (handleMsg(*iter) == -1)
+				{
+					close(*iter);
+					iter = g_clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
+					continue;
+				}
+			}
+			++iter;
 		}
 
 #endif              
