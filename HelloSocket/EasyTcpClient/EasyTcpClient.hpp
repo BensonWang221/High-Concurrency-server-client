@@ -1,7 +1,7 @@
 /*==================================================================================================
    Date                        Description of Change
-09-Nov-2020           1. ¢ÙFirst version
-                         ¢ÚÎªÁË·½±ã£¬ÔİÊ±²»°ÑÉùÃ÷ºÍÊµÏÖ·Ö¿ªÊµÏÖÁË
+09-Nov-2020           1. â‘ First version
+                         â‘¡ä¸ºäº†æ–¹ä¾¿ï¼Œæš‚æ—¶ä¸æŠŠå£°æ˜å’Œå®ç°åˆ†å¼€å®ç°äº†
 
 
 $$HISTORY$$
@@ -41,7 +41,7 @@ public:
 
 	}
 
-	// ³õÊ¼»¯
+	// åˆå§‹åŒ–
 	void InitSocket()
 	{
 		if (_sock != INVALID_SOCKET)
@@ -50,7 +50,7 @@ public:
 			Close();
 		}
 
-		// Æô¶¯WinSock2·şÎñ
+		// å¯åŠ¨WinSock2æœåŠ¡
 #ifdef _WIN32
 		WORD ver = MAKEWORD(2, 2);
 		WSADATA data;
@@ -82,7 +82,8 @@ public:
 		if ((ret = connect(_sock, (sockaddr*)&_serverAddr, sizeof(_serverAddr))) == SOCKET_ERROR)
 			printf("connect error\n");
 
-		printf("Connect to server success\n");
+		else
+			printf("Connect to server success\n");
 
 		return ret;
 	}
