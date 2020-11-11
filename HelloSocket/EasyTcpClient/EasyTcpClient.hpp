@@ -116,6 +116,7 @@ public:
 		if (select(_sock + 1, &readFds, nullptr, nullptr, nullptr) < 0)
 		{
 			printf("Client<%d> select error\n", _sock);
+			Close();
 			return false;
 		}
 

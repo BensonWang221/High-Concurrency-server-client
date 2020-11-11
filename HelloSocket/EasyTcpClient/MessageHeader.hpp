@@ -1,3 +1,5 @@
+#ifndef _MESSAGE_HEADER_INCLUDED
+#define _MESSAGE_HEADER_INCLUDED
 enum CMD
 {
 	CMD_LOGIN,
@@ -48,3 +50,5 @@ struct NewUserJoin : public DataHeader
 	NewUserJoin() : DataHeader(sizeof(NewUserJoin), CMD_NEW_USER_JOIN) {}
 	int sock;
 };
+
+#endif
