@@ -80,7 +80,10 @@ public:
 
 		int ret = -1;
 		if ((ret = connect(_sock, (sockaddr*)&_serverAddr, sizeof(_serverAddr))) == SOCKET_ERROR)
+		{
 			printf("connect error\n");
+			return ret;
+		}
 
 		printf("Connect to server success\n");
 
@@ -170,10 +173,10 @@ public:
 
 		default:
 		{
-			DataHeader header;
-			header.cmd = CMD_ERROR;
-			header.dataLength = 0;
-			send(_sock, (char*)&header, sizeof(DataHeader), 0);
+			DataHeader errHeader;
+			errHeader.cmd = CMD_ERROR;
+			errHeader.dataLength = 0;
+			send(_sock, (char*)&errHeader, sizeof(DataHeader), 0);
 		}
 		}
 	}
