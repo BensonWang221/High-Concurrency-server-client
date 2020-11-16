@@ -2,6 +2,7 @@
    Date                        Description of Change
 09-Nov-2020           First version
 09-Nov-2020           根据封装的EasyTcpClient类改进client应用程序
+15-Nov-2020           测试粘包问题
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -58,11 +59,17 @@ int main()
 	client.InitSocket();
 	client.Connect("127.0.0.1", 4567);
 
-	std::thread t1(cmdThread, &client);
-	t1.detach();
+	//std::thread t1(cmdThread, &client);
+	//t1.detach();
+
+	Login login;
+	strcpy_s(login.userName, "Benson");
+	strcpy_s(login.password, "12345678");
+
 	while (client.IsRunning())
 	{
 		client.OnRun();
+		client.SendData((DataHeader*)&login);
 	}
 
 	client.Close();

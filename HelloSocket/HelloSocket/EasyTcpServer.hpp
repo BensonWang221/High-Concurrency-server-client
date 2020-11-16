@@ -2,7 +2,8 @@
    Date                        Description of Change
 14-Nov-2020           1. ①First version
 						 ②为了方便，暂时不把声明和实现分开实现了
-
+16-Nov-2020           1. 解决粘包、少包问题：通过二级缓冲区，循环处理缓冲区数据
+                      2. 每个Client对应一个缓冲区
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -32,6 +33,53 @@ $$HISTORY$$
 #include <iostream>
 #include <vector>
 #include <thread>
+
+#ifndef RECVBUFSIZE
+#define RECVBUFSIZE 10240
+#endif
+
+namespace
+{
+	class Client
+	{
+	public:
+		virtual ~Client()
+		{
+			if (_sockFd != INVALID_SOCKET)
+				closesocket(_sockFd);
+		}
+
+		inline SOCKET GetSockFd() const
+		{
+			return _sockFd;
+		}
+
+		inline char* GetMsgBuf()
+		{
+			return _msgBuf;
+		}
+
+		inline SOCKET SetSockFd(const SOCKET sock)
+		{
+			return (_sockFd = sock);
+		}
+
+		inline size_t GetLastPos() const
+		{
+			return _lastPos;
+		}
+
+		inline void SetLastPos(const size_t pos)
+		{
+			_lastPos = pos;
+		}
+
+	private:
+		SOCKET _sockFd = INVALID_SOCKET; // client socket
+		size_t _lastPos = 0;
+		char _msgBuf[RECVBUFSIZE * 10] = { 0 };
+	};
+}
 
 class EasyTcpServer
 {
@@ -122,23 +170,24 @@ public:
 	{
 		sockaddr_in _clientAddr = {};
 		socklen_t _clientAddrLen = sizeof(_clientAddr);
-		SOCKET _clientSock = INVALID_SOCKET;
+		auto newClient = new Client;
+
 		char clientAddr[1024];
-		if ((_clientSock = accept(_sock, (sockaddr*)&_clientAddr, &_clientAddrLen)) == INVALID_SOCKET)
+		if ((newClient->SetSockFd(accept(_sock, (sockaddr*)&_clientAddr, &_clientAddrLen))) == INVALID_SOCKET)
 		{
 			printf("server<%d> accept an invalid client socket\n", (int)_sock);
 			return INVALID_SOCKET;
 		}
 
-		_maxFd = _maxFd > _clientSock ? _maxFd : _clientSock;
+		_maxFd = _maxFd > newClient->GetSockFd() ? _maxFd : newClient->GetSockFd();
 		NewUserJoin newUserJoin;
-		newUserJoin.sock = _clientSock;
+		newUserJoin.sock = newClient->GetSockFd();
 		SendDataToAll((const DataHeader*)&newUserJoin);
 
-		_clients.push_back(_clientSock);
+		_clients.push_back(newClient);
 
-		printf("Server<%d>: New client<%d> login, IP: %s\n", (int)_sock, (int)_clientSock, inet_ntop(AF_INET, (void*)&_clientAddr.sin_addr, clientAddr, sizeof(clientAddr)));
-		return _clientSock;
+		printf("Server<%d>: New client<%d> login, IP: %s\n", (int)_sock, (int)newClient->GetSockFd(), inet_ntop(AF_INET, (void*)&_clientAddr.sin_addr, clientAddr, sizeof(clientAddr)));
+		return newClient->GetSockFd();
 	}
 
 	void Close()
@@ -148,7 +197,7 @@ public:
 
 		// Close sockets
 		for (auto sock : _clients)
-			closesocket(sock);
+			delete sock;
 
 		closesocket(_sock);
 
@@ -170,7 +219,7 @@ public:
 		FD_SET(_sock, &exceptFds);
 
 		for (auto client : _clients)
-			FD_SET(client, &readFds);
+			FD_SET(client->GetSockFd(), &readFds);
 
 		timeval t{ 0, 0 };
 
@@ -195,7 +244,10 @@ public:
 			SOCKET sock = readFds.fd_array[i];
 			if (RecvData(sock) == -1)
 			{
-				auto iter = std::find(_clients.begin(), _clients.end(), sock);
+				auto iter = std::find_if(_clients.begin(), _clients.end(), [sock](Client* client)
+					{
+						return client->GetSockFd() == sock;
+					});
 
 				if (iter != _clients.end())
 					_clients.erase(iter);
@@ -206,19 +258,20 @@ public:
 		// For Linux, fd_set is different, so need to go through all clients
 		// 为了不在每次clientSock退出时再find遍历一遍，做一下改进
 		// 注意！！！！此处要注意vector在erase时的迭代器陷阱！！！
+		SOCKET sock;
 		for (auto iter = _clients.begin(); iter != _clients.end(); )
 		{
-			if (FD_ISSET(*iter, &readFds))
+			// 16-Nov-2020  将两个连着的if条件放在一起
+			if (FD_ISSET((sock = (*iter)->GetSockFd()), &readFds) && RecvData(sock) == -1)
 			{
-				if (RecvData(*iter) == -1)
-				{
-					int sock = *iter;
-					close(*iter);
-					iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
-					if (sock == _maxFd)
-						_maxFd = *(std::max_element(_clients.begin(), _clients.end()));
-					continue;
-				}
+				close(sock);
+				iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
+				if (sock == _maxFd)
+					_maxFd = (*(std::max_element(_clients.begin(), _clients.end(), [](Client* client1, Client* client2)
+						{
+							return client1->GetSockFd() < client2->GetSockFd();
+						})))->GetSockFd();
+				continue;
 			}
 			++iter;
 		}
@@ -228,10 +281,10 @@ public:
 
 	int RecvData(SOCKET clientSock)
 	{
-		char recvBuf[1024];
+		char recvBuf[102400];
 		int cmdLen;
 
-		if ((cmdLen = recv(clientSock, recvBuf, sizeof(DataHeader), 0)) <= 0)
+		if ((cmdLen = recv(clientSock, recvBuf, 102400, 0)) <= 0)
 		{
 			printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)clientSock);
 			return -1;
@@ -294,7 +347,7 @@ public:
 	inline void SendDataToAll(const DataHeader* header)
 	{
 		for (auto sock : _clients)
-			SendData(sock, header);
+			SendData(sock->GetSockFd(), header);
 	}
 
 	bool IsRunning()
@@ -305,7 +358,10 @@ public:
 private:
 	SOCKET _sock = INVALID_SOCKET;
 	SOCKET _maxFd = INVALID_SOCKET;
-	std::vector<SOCKET> _clients;
+
+	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
+	// 所以这里使用Client*
+	std::vector<Client*> _clients;
 };
 
 #endif

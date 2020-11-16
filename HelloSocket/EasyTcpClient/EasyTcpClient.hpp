@@ -2,7 +2,8 @@
    Date                        Description of Change
 09-Nov-2020           1. ①First version
                          ②为了方便，暂时不把声明和实现分开实现了
-
+15-Nov-2020           1. 测试粘包问题
+16-Nov-2020           1. 解决粘包、少包问题：通过二级缓冲区，循环处理缓冲区数据
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -28,6 +29,10 @@ $$HISTORY$$
 #include "MessageHeader.hpp"
 #include <stdlib.h>
 #include <iostream>
+
+#ifndef RECVBUFSIZE
+#define RECVBUFSIZE 10240
+#endif
 
 class EasyTcpClient
 {
@@ -117,7 +122,8 @@ public:
 		FD_ZERO(&readFds);
 		FD_SET(_sock, &readFds);
 
-		if (select(_sock + 1, &readFds, nullptr, nullptr, nullptr) < 0)
+		timeval t{ 0, 0 };
+		if (select(_sock + 1, &readFds, nullptr, nullptr, &t) < 0)
 		{
 			printf("Client<%d> select error\n", _sock);
 			Close();
@@ -132,20 +138,39 @@ public:
 		}
 		return true;
 	}
-
+	
 	int RecvData()
 	{
-		char recvBuf[1024];
+		
 		int cmdLen;
 
-		if ((cmdLen = recv(_sock, recvBuf, sizeof(DataHeader), 0)) <= 0)
+		/*if ((cmdLen = recv(_sock, _recvBuf, sizeof(DataHeader), 0)) <= 0)
 		{
 			printf("Disconnect with server, going to close\n");
 			return -1;
 		}
 
-		recv(_sock, recvBuf + sizeof(DataHeader), ((DataHeader*)recvBuf)->dataLength - sizeof(DataHeader), 0);
-		OnNetMsg((DataHeader*)recvBuf);
+		recv(_sock, _recvBuf + sizeof(DataHeader), ((DataHeader*)_recvBuf)->dataLength - sizeof(DataHeader), 0);
+		OnNetMsg((DataHeader*)_recvBuf);*/
+
+		if ((cmdLen = recv(_sock, _recvBuf, RECVBUFSIZE, 0)) <= 0)
+		{
+			printf("Disconnect with server, going to close\n");
+			return -1;
+		}
+
+		memcpy(_msgBuf + _lastPos, _recvBuf, (size_t)cmdLen);
+		_lastPos += cmdLen;
+
+		// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
+		// &&的短路运算，第一个条件成立时才判断第二个条件
+		int msgLength;
+		while (_lastPos >= sizeof(DataHeader) && (_lastPos >= (msgLength = ((DataHeader*)_msgBuf)->dataLength)))
+		{
+			OnNetMsg((DataHeader*)_msgBuf);
+			memcpy(_msgBuf, _msgBuf + msgLength, _lastPos - msgLength);
+			_lastPos -= msgLength;
+		}
 		
 		return 0;
 	}
@@ -178,6 +203,7 @@ public:
 			errHeader.cmd = CMD_ERROR;
 			errHeader.dataLength = 0;
 			send(_sock, (char*)&errHeader, sizeof(DataHeader), 0);
+			printf("client<%d>: message error...\n", _sock);
 		}
 		}
 	}
@@ -200,6 +226,15 @@ protected:
 	
 private:
 	SOCKET _sock = INVALID_SOCKET;
+
+	// 接收缓冲区
+	char _recvBuf[RECVBUFSIZE];
+
+	// 消息缓冲区 - 第二缓冲区
+	char _msgBuf[RECVBUFSIZE * 10];
+
+	// 上一次消息的头部位置
+	size_t _lastPos = 0;
 };
 
 #endif
