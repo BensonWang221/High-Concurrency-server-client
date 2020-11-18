@@ -4,6 +4,7 @@
 						 ②为了方便，暂时不把声明和实现分开实现了
 16-Nov-2020           1. 解决粘包、少包问题：通过二级缓冲区，循环处理缓冲区数据
                       2. 每个Client对应一个缓冲区
+17-Nov-2020           1. 改进server receive data
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -238,7 +239,7 @@ public:
 			Accept();
 		}
 
-#ifdef _WIN32
+/*#ifdef _WIN32
 		for (size_t i = 0; i < readFds.fd_count; i++)
 		{
 			SOCKET sock = readFds.fd_array[i];
@@ -250,11 +251,13 @@ public:
 					});
 
 				if (iter != _clients.end())
+				{
+					delete (*iter);
 					_clients.erase(iter);
-				closesocket(sock);
+				}
 			}
 		}
-#else
+#else*/
 		// For Linux, fd_set is different, so need to go through all clients
 		// 为了不在每次clientSock退出时再find遍历一遍，做一下改进
 		// 注意！！！！此处要注意vector在erase时的迭代器陷阱！！！
@@ -262,36 +265,54 @@ public:
 		for (auto iter = _clients.begin(); iter != _clients.end(); )
 		{
 			// 16-Nov-2020  将两个连着的if条件放在一起
-			if (FD_ISSET((sock = (*iter)->GetSockFd()), &readFds) && RecvData(sock) == -1)
+			if (FD_ISSET((sock = (*iter)->GetSockFd()), &readFds) && RecvData(*iter) == -1)
 			{
-				close(sock);
 				iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
+#ifndef _WIN32
+				// Windows上无需寻找maxFd
+
+				// 修复bug，在if条件中添加 _clients.size() > 1; 不然后面comp会有error，因为必须传给lambda表达式两个参数，即_clients里至少有两个
 				if (sock == _maxFd)
+				{
 					_maxFd = (*(std::max_element(_clients.begin(), _clients.end(), [](Client* client1, Client* client2)
 						{
 							return client1->GetSockFd() < client2->GetSockFd();
 						})))->GetSockFd();
+
+					// 此时需要判断client socket最大值和server socket谁最大
+					_maxFd = _maxFd < _sock ? _sock : _maxFd;
+				}
+#endif
 				continue;
 			}
 			++iter;
 		}
 
-#endif              
+//#endif              
 	}
 
-	int RecvData(SOCKET clientSock)
+	int RecvData(Client* client)
 	{
-		char recvBuf[102400];
 		int cmdLen;
 
-		if ((cmdLen = recv(clientSock, recvBuf, 102400, 0)) <= 0)
+		if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
 		{
-			printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)clientSock);
+			printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
 			return -1;
 		}
 
-		recv(_sock, recvBuf + sizeof(DataHeader), ((DataHeader*)recvBuf)->dataLength - sizeof(DataHeader), 0);
-		OnNetMsg(clientSock, recvBuf);
+		memcpy(client->GetMsgBuf() + client->GetLastPos(), _recvBuf, (size_t)cmdLen);
+		client->SetLastPos(client->GetLastPos() + cmdLen);
+
+		// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
+		// &&的短路运算，第一个条件成立时才判断第二个条件
+		size_t msgLength;
+		while (client->GetLastPos() >= sizeof(DataHeader) && (client->GetLastPos() >= (msgLength = ((DataHeader*)client->GetMsgBuf())->dataLength)))
+		{
+			OnNetMsg(client->GetSockFd(), client->GetMsgBuf());
+			memcpy(client->GetMsgBuf(), client->GetMsgBuf() + msgLength, client->GetLastPos() - msgLength);
+			client->SetLastPos(client->GetLastPos() - msgLength);
+		}
 
 		return 0;
 	}
@@ -302,9 +323,8 @@ public:
 		{
 		case CMD_LOGIN:
 		{
-			recv(clientSock, header + sizeof(DataHeader), ((DataHeader*)header)->dataLength - sizeof(DataHeader), 0);
 			// �ж��û�������
-			printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
+			//printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
 
 			LoginResult loginResult;
 			loginResult.result = 1;
@@ -314,8 +334,7 @@ public:
 
 		case CMD_LOGOUT:
 		{
-			recv(clientSock, header + sizeof(DataHeader), ((DataHeader*)header)->dataLength - sizeof(DataHeader), 0);
-			printf("User<%d>: %s has logged out\n", clientSock, ((Logout*)header)->userName);
+			//printf("User<%d>: %s has logged out\n", clientSock, ((Logout*)header)->userName);
 
 			LogoutResult logoutResult;
 			logoutResult.result = 1;
@@ -325,10 +344,11 @@ public:
 
 		default:
 		{
-			DataHeader errheader;
+			/*DataHeader errheader;
 			errheader.cmd = CMD_ERROR;
-			errheader.dataLength = 0;
-			SendData(clientSock, (const DataHeader*)&errheader);
+			errheader.dataLength = sizeof(DataHeader);
+			SendData(clientSock, (const DataHeader*)&errheader);*/
+			printf("Server<%d> received undefined message, datalength = %d..\n", _sock, ((DataHeader*)header)->dataLength);
 		}
 		}
 	}
@@ -341,7 +361,7 @@ public:
 			return -1;
 		}
 
-		return (send(clientSock, (char*)header, header->dataLength, 0));
+		return (send(clientSock, (const char*)header, header->dataLength, 0));
 	}
 
 	inline void SendDataToAll(const DataHeader* header)
@@ -358,6 +378,7 @@ public:
 private:
 	SOCKET _sock = INVALID_SOCKET;
 	SOCKET _maxFd = INVALID_SOCKET;
+	char _recvBuf[RECVBUFSIZE];
 
 	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 	// 所以这里使用Client*

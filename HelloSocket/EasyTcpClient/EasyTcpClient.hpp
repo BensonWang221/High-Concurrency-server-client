@@ -181,19 +181,19 @@ public:
 		{
 		case CMD_LOGIN_RESULT:
 		{
-			printf("Reveived login result from server: %d\n", ((LoginResult*)header)->result);
+			//printf("Reveived login result from server: %d\n", ((LoginResult*)header)->result);
 		}
 		break;
 
 		case CMD_LOGOUT:
 		{
-			printf("Reveived login result from server: %d\n", ((LogoutResult*)header)->result);
+			//printf("Reveived login result from server: %d\n", ((LogoutResult*)header)->result);
 		}
 		break;
 
 		case CMD_NEW_USER_JOIN:
 		{
-			printf("A new user has joined: %d, welcome!\n", ((NewUserJoin*)header)->sock);
+			//printf("A new user has joined: %d, welcome!\n", ((NewUserJoin*)header)->sock);
 		}
 		break;
 
