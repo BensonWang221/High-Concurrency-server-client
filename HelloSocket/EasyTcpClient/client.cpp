@@ -55,24 +55,40 @@ void cmdThread(EasyTcpClient* client)
 
 int main()
 {
-	EasyTcpClient client;
-	client.InitSocket();
-	client.Connect("127.0.0.1", 4567);
+	//EasyTcpClient client;
+	//client.InitSocket();
+	//client.Connect("127.0.0.1", 4567);
 
 	//std::thread t1(cmdThread, &client);
 	//t1.detach();
+	const int clientsCount = 80;
+
+	EasyTcpClient* clients[clientsCount];
+	
+	for (auto& client : clients)
+		client = new EasyTcpClient;
+
+	for (size_t i = 0; i < clientsCount; i++)
+	{
+		clients[i]->Connect("127.0.0.1", 4567);
+		printf("Number: %u joined...\n", i);
+	}
 
 	Login login;
 	strcpy_s(login.userName, "Benson");
 	strcpy_s(login.password, "12345678");
 
-	while (client.IsRunning())
+	while (true)
 	{
-		client.OnRun();
-		client.SendData((DataHeader*)&login);
+		for (auto client : clients)
+		{
+			client->OnRun();
+			client->SendData((DataHeader*)&login);
+		};
 	}
 
-	client.Close();
+	for (auto client : clients)
+		client->Close();
 
 	getchar();
 	return 0;

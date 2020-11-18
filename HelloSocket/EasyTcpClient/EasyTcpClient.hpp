@@ -164,7 +164,7 @@ public:
 
 		// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
 		// &&的短路运算，第一个条件成立时才判断第二个条件
-		int msgLength;
+		size_t msgLength;
 		while (_lastPos >= sizeof(DataHeader) && (_lastPos >= (msgLength = ((DataHeader*)_msgBuf)->dataLength)))
 		{
 			OnNetMsg((DataHeader*)_msgBuf);

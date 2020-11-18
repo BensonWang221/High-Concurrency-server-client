@@ -5,6 +5,7 @@
 16-Nov-2020           1. 解决粘包、少包问题：通过二级缓冲区，循环处理缓冲区数据
                       2. 每个Client对应一个缓冲区
 17-Nov-2020           1. 改进server receive data
+18-Nov-2020           1. 添加std高精度计时器测试数据处理能力
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -28,12 +29,13 @@ $$HISTORY$$
 #define strcpy_s strcpy
 #define closksocket close
 #endif
-#include "MessageHeader.hpp"
 #include <algorithm>
 #include <stdlib.h>
 #include <iostream>
 #include <vector>
 #include <thread>
+#include "MessageHeader.hpp"
+#include "CELLTimestamp.hpp"
 
 #ifndef RECVBUFSIZE
 #define RECVBUFSIZE 10240
@@ -85,10 +87,6 @@ namespace
 class EasyTcpServer
 {
 public:
-	EasyTcpServer()
-	{
-
-	}
 	virtual ~EasyTcpServer()
 	{
 		Close();
@@ -267,6 +265,7 @@ public:
 			// 16-Nov-2020  将两个连着的if条件放在一起
 			if (FD_ISSET((sock = (*iter)->GetSockFd()), &readFds) && RecvData(*iter) == -1)
 			{
+				delete (*iter);
 				iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
 #ifndef _WIN32
 				// Windows上无需寻找maxFd
@@ -293,6 +292,16 @@ public:
 
 	int RecvData(Client* client)
 	{
+		_recvCount++;
+		auto tSection = _cellTimer.GetElapsedTimeInSecond();
+		// 每间隔1.0 ms 打印接收数量
+		if (tSection >= 1.0)
+		{
+			printf("server<%d>: tSection: %lf\trecvCount: %u\n", _sock, tSection, _recvCount);
+			_recvCount = 0;
+			_cellTimer.Update();
+		}
+
 		int cmdLen;
 
 		if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
@@ -383,6 +392,8 @@ private:
 	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 	// 所以这里使用Client*
 	std::vector<Client*> _clients;
+	CELLTimestamp _cellTimer;
+	size_t _recvCount = 0;
 };
 
 #endif
