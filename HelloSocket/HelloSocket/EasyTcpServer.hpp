@@ -6,6 +6,7 @@
                       2. 每个Client对应一个缓冲区
 17-Nov-2020           1. 改进server receive data
 18-Nov-2020           1. 添加std高精度计时器测试数据处理能力
+19-Nov-2020           1. 修复用max_element获得maxFd的bug
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -14,6 +15,7 @@ $$HISTORY$$
 #define _EASY_TCP_SERVER_INCLUDED
 
 #ifdef _WIN32
+#define FD_SETSIZE      1024
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <WinSock2.h>
@@ -270,22 +272,25 @@ public:
 #ifndef _WIN32
 				// Windows上无需寻找maxFd
 
-				// 修复bug，在if条件中添加 _clients.size() > 1; 不然后面comp会有error，因为必须传给lambda表达式两个参数，即_clients里至少有两个
-				if (sock == _maxFd)
+				// 修复此处bug，有两处
+				// 1. 在用max_element时lambda函数有两个参数，因此需要保证_clients.size() > 1，否则会有错误
+				// 2. 之前if条件没有!empty(), 会引起段错误, 因为在只有最后一个元素且被erase后，_clients[0]会引起segment fault
+				// 其实这里手动遍历_clients找到最大值就可以了，先不改了作为错误示范
+				if (sock == _maxFd && !_clients.empty())
 				{
-					_maxFd = (*(std::max_element(_clients.begin(), _clients.end(), [](Client* client1, Client* client2)
+					_maxFd = _clients.size() > 1 ? (*(std::max_element(_clients.begin(), _clients.end(), [](Client* client1, Client* client2)
 						{
 							return client1->GetSockFd() < client2->GetSockFd();
-						})))->GetSockFd();
+						})))->GetSockFd() : _clients[0]->GetSockFd();
 
-					// 此时需要判断client socket最大值和server socket谁最大
-					_maxFd = _maxFd < _sock ? _sock : _maxFd;
-				}
+						// 此时需要判断client socket最大值和server socket谁最大
+						_maxFd = _maxFd < _sock ? _sock : _maxFd;
+			}
 #endif
 				continue;
-			}
-			++iter;
 		}
+			++iter;
+	}
 
 //#endif              
 	}
