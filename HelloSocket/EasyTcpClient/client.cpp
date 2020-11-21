@@ -3,15 +3,22 @@
 09-Nov-2020           First version
 09-Nov-2020           根据封装的EasyTcpClient类改进client应用程序
 15-Nov-2020           测试粘包问题
+21-Nov-2020           四线程创建客户端连接服务端和发送数据
 
 $$HISTORY$$
 ====================================================================================================*/
 
 #include "EasyTcpClient.hpp"
 #include <thread>
+#include <atomic>
 
 char userName[32];
 
+Login login; 
+const int clientsCount = 2000;
+const int threadCount = 4;
+EasyTcpClient* clients[clientsCount];
+std::atomic_int clientNum = 0;
 
 void cmdThread(EasyTcpClient* client)
 {
@@ -53,38 +60,49 @@ void cmdThread(EasyTcpClient* client)
 	}
 }
 
+void SendThread(int id)
+{
+	size_t begin = clientsCount / threadCount * (id - 1);
+	size_t end = id != threadCount ? (clientsCount / threadCount * id - 1) : (clientsCount - 1);
+	// 此处要用auto&，因为auto是值传递
+	for (size_t i = begin; i <= end; i++)
+		clients[i] = new EasyTcpClient;
+
+	for (size_t i = begin; i <= end; i++)
+	{
+		clients[i]->Connect("127.0.0.1", 4567);
+		//printf("Thread %d Number: %u joined...\n", id, i);
+	}
+
+	while (true)
+	{
+		for (size_t i = begin; i <= end; i++)
+		{
+			clients[i]->OnRun();
+			clients[i]->SendData((DataHeader*)&login);
+		};
+	}
+}
+
 int main()
 {
 	//EasyTcpClient client;
 	//client.InitSocket();
 	//client.Connect("127.0.0.1", 4567);
-
-	//std::thread t1(cmdThread, &client);
-	//t1.detach();
-	const int clientsCount = 80;
-
-	EasyTcpClient* clients[clientsCount];
-	
-	for (auto& client : clients)
-		client = new EasyTcpClient;
-
-	for (size_t i = 0; i < clientsCount; i++)
-	{
-		clients[i]->Connect("127.0.0.1", 4567);
-		printf("Number: %u joined...\n", i);
-	}
-
-	Login login;
 	strcpy_s(login.userName, "Benson");
 	strcpy_s(login.password, "12345678");
+	//std::thread t1(cmdThread, &client);
+	//t1.detach();
 
-	while (true)
+	std::thread threads[threadCount];
+	for (int i = 0; i < threadCount; i++)
 	{
-		for (auto client : clients)
-		{
-			client->OnRun();
-			client->SendData((DataHeader*)&login);
-		};
+		threads[i] = std::thread(SendThread, i + 1);
+	}
+
+	for (auto& thread : threads)
+	{
+		thread.join();
 	}
 
 	for (auto client : clients)

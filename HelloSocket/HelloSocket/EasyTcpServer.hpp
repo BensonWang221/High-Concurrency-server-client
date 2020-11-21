@@ -7,6 +7,7 @@
 17-Nov-2020           1. 改进server receive data
 18-Nov-2020           1. 添加std高精度计时器测试数据处理能力
 19-Nov-2020           1. 修复用max_element获得maxFd的bug
+21-Nov-2020           1. 改进select的_readFds, 不再每次都重新FDSET, 增加一个备份来传入select
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -15,21 +16,21 @@ $$HISTORY$$
 #define _EASY_TCP_SERVER_INCLUDED
 
 #ifdef _WIN32
-#define FD_SETSIZE      1024
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <WinSock2.h>
-#include <WS2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
+	#define FD_SETSIZE      10010
+	#define WIN32_LEAN_AND_MEAN
+	#include <WinSock2.h>
+	#include <WS2tcpip.h>
+	#include <Windows.h>
+	#pragma comment(lib, "ws2_32.lib")
 #else
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <string.h>
-#define SOCKET int
-#define INVALID_SOCKET  (SOCKET)(~0)
-#define SOCKET_ERROR            (-1)
-#define strcpy_s strcpy
-#define closksocket close
+	#include <unistd.h>
+	#include <arpa/inet.h>
+	#include <string.h>
+	#define SOCKET int
+	#define INVALID_SOCKET  (SOCKET)(~0)
+	#define SOCKET_ERROR            (-1)
+	#define strcpy_s strcpy
+	#define closksocket close
 #endif
 #include <algorithm>
 #include <stdlib.h>
@@ -89,6 +90,11 @@ namespace
 class EasyTcpServer
 {
 public:
+	EasyTcpServer()
+	{
+		FD_ZERO(&_readFds);
+	}
+
 	virtual ~EasyTcpServer()
 	{
 		Close();
@@ -163,6 +169,7 @@ public:
 			return -1;
 		}
 
+		FD_SET(_sock, &_readFds);
 		printf("server<%d> listen success\n", (int)_sock);
 		return 0;
 	}
@@ -185,9 +192,10 @@ public:
 		newUserJoin.sock = newClient->GetSockFd();
 		SendDataToAll((const DataHeader*)&newUserJoin);
 
+		FD_SET(newClient->GetSockFd(), &_readFds);
 		_clients.push_back(newClient);
 
-		printf("Server<%d>: New client<%d> login, IP: %s\n", (int)_sock, (int)newClient->GetSockFd(), inet_ntop(AF_INET, (void*)&_clientAddr.sin_addr, clientAddr, sizeof(clientAddr)));
+		printf("Server<%d>: New client<%d> login, IP: %s, Number.%d\n", (int)_sock, (int)newClient->GetSockFd(), inet_ntop(AF_INET, (void*)&_clientAddr.sin_addr, clientAddr, sizeof(clientAddr)), _clients.size());
 		return newClient->GetSockFd();
 	}
 
@@ -210,21 +218,11 @@ public:
 
 	void OnRun()
 	{
-		fd_set readFds, writeFds, exceptFds;
-		FD_ZERO(&readFds);
-		FD_ZERO(&writeFds);
-		FD_ZERO(&exceptFds);
+		// 将allset传入select，而_readFds只保存需要select的值，循环一遍后重新将其赋给allset
+		fd_set allset = _readFds;
 
-		FD_SET(_sock, &readFds);
-		FD_SET(_sock, &writeFds);
-		FD_SET(_sock, &exceptFds);
-
-		for (auto client : _clients)
-			FD_SET(client->GetSockFd(), &readFds);
-
-		timeval t{ 0, 0 };
-
-		int ret = select(_maxFd + 1, &readFds, &writeFds, &exceptFds, &t);
+		//timeval t{ 0, 0 };
+		int ret = select(_maxFd + 1, &allset, nullptr, nullptr, nullptr);
 
 		if (ret < 0)
 		{
@@ -233,16 +231,16 @@ public:
 			return;
 		}
 
-		if (FD_ISSET(_sock, &readFds))
+		if (FD_ISSET(_sock, &allset))
 		{
-			FD_CLR(_sock, &readFds);
+			FD_CLR(_sock, &allset);
 			Accept();
 		}
 
 /*#ifdef _WIN32
-		for (size_t i = 0; i < readFds.fd_count; i++)
+		for (size_t i = 0; i < _readFds.fd_count; i++)
 		{
-			SOCKET sock = readFds.fd_array[i];
+			SOCKET sock = _readFds.fd_array[i];
 			if (RecvData(sock) == -1)
 			{
 				auto iter = std::find_if(_clients.begin(), _clients.end(), [sock](Client* client)
@@ -265,8 +263,9 @@ public:
 		for (auto iter = _clients.begin(); iter != _clients.end(); )
 		{
 			// 16-Nov-2020  将两个连着的if条件放在一起
-			if (FD_ISSET((sock = (*iter)->GetSockFd()), &readFds) && RecvData(*iter) == -1)
+			if (FD_ISSET((sock = (*iter)->GetSockFd()), &allset) && RecvData(*iter) == -1)
 			{
+				FD_CLR(sock, &_readFds);
 				delete (*iter);
 				iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
 #ifndef _WIN32
@@ -393,6 +392,7 @@ private:
 	SOCKET _sock = INVALID_SOCKET;
 	SOCKET _maxFd = INVALID_SOCKET;
 	char _recvBuf[RECVBUFSIZE];
+	fd_set _readFds;
 
 	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 	// 所以这里使用Client*

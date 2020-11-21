@@ -12,10 +12,11 @@ $$HISTORY$$
 #define _EASY_TCP_CLIENT_INCLUDED
 
 #ifdef _WIN32
+	#define FD_SETSIZE      1024
 	#define WIN32_LEAN_AND_MEAN
-	#include <Windows.h>
 	#include <WinSock2.h>
 	#include <WS2tcpip.h>
+	#include <Windows.h>
 	#pragma comment(lib, "ws2_32.lib")
 #else
 	#include <unistd.h>
@@ -67,10 +68,10 @@ public:
 		if (_sock == INVALID_SOCKET)
 			printf("create client socket failed...\n");
 
-		printf("Create client socket<%d> successfully..\n", _sock);
+		//printf("Create client socket<%d> successfully..\n", _sock);
 	}
 
-	int  Connect(const char* ip, const unsigned short port)
+	int Connect(const char* ip, const unsigned short port)
 	{
 		if (_sock == INVALID_SOCKET)
 			InitSocket();
@@ -91,7 +92,7 @@ public:
 		}
 
 		else
-			printf("Connect to server success\n");
+			//printf("Connect to server success\n");
 
 		return ret;
 	}
@@ -122,8 +123,8 @@ public:
 		FD_ZERO(&readFds);
 		FD_SET(_sock, &readFds);
 
-		timeval t{ 0, 0 };
-		if (select(_sock + 1, &readFds, nullptr, nullptr, &t) < 0)
+		//timeval t{ 0, 0 };
+		if (select(_sock + 1, &readFds, nullptr, nullptr, nullptr) < 0)
 		{
 			printf("Client<%d> select error\n", _sock);
 			Close();
