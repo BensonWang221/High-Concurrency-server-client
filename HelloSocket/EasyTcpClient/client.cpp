@@ -71,7 +71,7 @@ void SendThread(int id)
 	for (size_t i = begin; i <= end; i++)
 	{
 		clients[i]->Connect("127.0.0.1", 4567);
-		//printf("Thread %d Number: %u joined...\n", id, i);
+		printf("Thread %d Number: %u joined...\n", id, i);
 	}
 
 	while (true)

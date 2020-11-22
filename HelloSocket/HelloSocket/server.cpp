@@ -20,6 +20,7 @@ int main()
 	//server.InitSocket();
 	server.Bind(nullptr, 4567);
 	server.Listen(3000);
+	server.Start();
 
 	while (true)
 	{

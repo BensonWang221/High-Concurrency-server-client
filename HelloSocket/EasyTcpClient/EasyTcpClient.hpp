@@ -123,8 +123,8 @@ public:
 		FD_ZERO(&readFds);
 		FD_SET(_sock, &readFds);
 
-		//timeval t{ 0, 0 };
-		if (select(_sock + 1, &readFds, nullptr, nullptr, nullptr) < 0)
+		timeval t{ 0, 0 };
+		if (select(_sock + 1, &readFds, nullptr, nullptr, &t) < 0)
 		{
 			printf("Client<%d> select error\n", _sock);
 			Close();
