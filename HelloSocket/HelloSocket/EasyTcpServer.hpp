@@ -17,7 +17,7 @@ $$HISTORY$$
 #define _EASY_TCP_SERVER_INCLUDED
 
 #ifdef _WIN32
-	#define FD_SETSIZE      1024
+	#define FD_SETSIZE      2506
 	#define WIN32_LEAN_AND_MEAN
 	#include <WinSock2.h>
 	#include <WS2tcpip.h>
@@ -40,6 +40,7 @@ $$HISTORY$$
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <functional>
 #include "MessageHeader.hpp"
 #include "CELLTimestamp.hpp"
 
@@ -53,6 +54,7 @@ namespace
 {
 	std::atomic_int recvCount = 0;
 
+	// 客户端对象，包含缓冲区
 	class Client
 	{
 	public:
@@ -96,7 +98,7 @@ namespace
 	class CellServer
 	{
 	public:
-		CellServer(SOCKET sock) : _sock(sock), _maxFd(sock)
+		CellServer(SOCKET sock) : _sock(sock)
 		{
 			FD_ZERO(&_readFds);
 		}
@@ -146,12 +148,12 @@ namespace
 				// 将allset传入select，而_readFds只保存需要select的值，循环一遍后重新将其赋给allset
 				fd_set allset = _readFds;
 
-				timeval t{ 0, 0 };
+				timeval t{ 0, 10 };
 				int ret = select(_maxFd + 1, &allset, nullptr, nullptr, &t);
 
 				if (ret < 0)
 				{
-					printf("select error\n");
+					printf("Thread: select error\n");
 					Close();
 					return;
 				}
@@ -221,8 +223,14 @@ namespace
 
 		void Start()
 		{
-			_thread = std::thread(&CellServer::OnRun, this);
+			// std::mem_fun, 参数可以是对象指针或对象
+			_thread = std::thread(std::mem_fn(&CellServer::OnRun), this);
 			_thread.detach();
+		}
+
+		inline size_t GetClientsNum()
+		{
+			return _clients.size();
 		}
 
 		int RecvData(Client* client)
@@ -233,7 +241,7 @@ namespace
 
 			if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
 			{
-				printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
+				//printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
 				return -1;
 			}
 
@@ -320,13 +328,9 @@ namespace
 
 		void AddClient(Client* client)
 		{
+			// 实际应用此处可以对client进行验证，是否为非法链接
 			std::lock_guard<std::mutex> lg(_mutex);
 			_clientsBuf.push_back(client);
-		}
-
-		inline size_t GetClientNum()
-		{
-			return _clients.size() + _clientsBuf.size();
 		}
 
 	private:
@@ -451,7 +455,7 @@ public:
 		{
 			auto minCellServer = _cellServers[0];
 			for (auto cellServer : _cellServers)
-				minCellServer = minCellServer->GetClientNum() < cellServer->GetClientNum() ? minCellServer : cellServer;
+				minCellServer = minCellServer->GetClientsNum() < cellServer->GetClientsNum() ? minCellServer : cellServer;
 
 			minCellServer->AddClient(client);
 		}
@@ -515,10 +519,14 @@ public:
 	void MsgPerSecond()
 	{
 		auto tSection = _cellTimer.GetElapsedTimeInSecond();
+
 		//每间隔1.0 ms 打印接收数量
 		if (tSection >= 1.0)
 		{
-			printf("server<%d>: tSection: %lf\trecvCount: %u\n", _sock, tSection, recvCount.load());
+			size_t totalClientsNum = 0;
+			for (auto cellSer : _cellServers)
+				totalClientsNum += cellSer->GetClientsNum();
+			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %u\n", _sock, tSection, totalClientsNum, recvCount.load());
 			recvCount = 0;
 			_cellTimer.Update();
 		}
