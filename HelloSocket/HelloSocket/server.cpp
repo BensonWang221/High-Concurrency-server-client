@@ -4,19 +4,67 @@
 09-Nov-2020           ①针对Linux在遍历返回的fd_set时，不再每次遍历获取maxFd，而是保存maxFd，在新加或删除时更新maxFd
                       ②注意vector/deque在用iterator遍历时，不能随便erase，注意迭代器陷阱！erase后续iterator失效！！
 14-Nov-2020           封装类EasyTcpServer，重写server.cpp
+24-Nov-2020           实现MyServer继承EasyTcpServer，扩展功能
 
 $$HISTORY$$
 ====================================================================================================*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <vector>
 #include "EasyTcpServer.hpp"
 
+class MyServer : public EasyTcpServer
+{
+public:
+	virtual void OnNetJoin(Client* client)
+	{
+		EasyTcpServer::OnNetJoin(client);
+	}
+
+	virtual void OnNetLeave(Client* client)
+	{
+		EasyTcpServer::OnNetLeave(client);
+	}
+
+	virtual void OnNetMsg(Client* client, DataHeader* header)
+	{
+		EasyTcpServer::OnNetMsg(client, header);
+		switch ((header)->cmd)
+		{
+		case CMD_LOGIN:
+		{
+			// �ж��û�������
+			//printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
+
+			LoginResult loginResult;
+			loginResult.result = 1;
+			//client->SendData((const DataHeader*)&loginResult);
+		}
+		break;
+
+		case CMD_LOGOUT:
+		{
+			//printf("User<%d>: %s has logged out\n", clientSock, ((Logout*)header)->userName);
+
+			LogoutResult logoutResult;
+			logoutResult.result = 1;
+			//client->SendData((const DataHeader*)&logoutResult);
+		}
+		break;
+
+		default:
+		{
+			/*DataHeader errheader;
+			errheader.cmd = CMD_ERROR;
+			errheader.dataLength = sizeof(DataHeader);
+			client->SendData((const DataHeader*)&errheader);*/
+			//printf("Server<%d> received undefined message, datalength = %d..\n", _sock, ((DataHeader*)header)->dataLength);
+		}
+		}
+	}
+};
 
 int main()
 {
-	EasyTcpServer server;
+	MyServer server;
 	//server.InitSocket();
 	server.Bind(nullptr, 4567);
 	server.Listen(3000);

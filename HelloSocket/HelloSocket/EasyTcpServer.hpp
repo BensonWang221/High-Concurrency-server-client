@@ -9,6 +9,7 @@
 19-Nov-2020           1. 修复用max_element获得maxFd的bug
 21-Nov-2020           1. 改进select的_readFds, 不再每次都重新FDSET, 增加一个备份来传入select
 23-Nov-2020           1. 多线程分组处理客户端数据，使用生产者-消费者模型, 主线程accept，将客户端数据分给四个子线程处理
+24-Nov-2020           1. 添加INetEvent作为EasyTcpServer的纯虚基类
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -37,6 +38,7 @@ $$HISTORY$$
 #include <stdlib.h>
 #include <iostream>
 #include <vector>
+#include <map>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -52,8 +54,6 @@ $$HISTORY$$
 
 namespace
 {
-	std::atomic_int recvCount = 0;
-
 	// 客户端对象，包含缓冲区
 	class Client
 	{
@@ -89,16 +89,31 @@ namespace
 			_lastPos = pos;
 		}
 
+		inline void SendData(const DataHeader* header)
+		{
+			send(_sockFd, (const char*)header, header->dataLength, 0);
+		}
+
 	private:
 		SOCKET _sockFd = INVALID_SOCKET; // client socket
 		size_t _lastPos = 0;
 		char _msgBuf[RECVBUFSIZE * 10] = { 0 };
 	};
 
+	class INetEvent
+	{
+	public:
+		virtual void OnNetJoin(Client*) = 0;
+
+		virtual void OnNetLeave(Client*) = 0;
+
+		virtual void OnNetMsg(Client*, DataHeader*) = 0;
+	};
+
 	class CellServer
 	{
 	public:
-		CellServer(SOCKET sock) : _sock(sock)
+		CellServer(SOCKET sock, INetEvent* event) : _sock(sock), _event(event)
 		{
 			FD_ZERO(&_readFds);
 		}
@@ -109,8 +124,7 @@ namespace
 			{
 				for (auto& client : _clients)
 				{
-					delete client;
-					client = nullptr;
+					delete client.second;
 					_sock = INVALID_SOCKET;
 				}
 			}
@@ -118,7 +132,7 @@ namespace
 
 		void OnRun()
 		{
-			
+			fd_set allset;
 			while (true)
 			{
 				if (!IsRunning())
@@ -131,7 +145,7 @@ namespace
 					for (auto client : _clientsBuf)
 					{
 						_maxFd = _maxFd > client->GetSockFd() ? _maxFd : client->GetSockFd();
-						_clients.push_back(client);
+						_clients[client->GetSockFd()] = client;
 						FD_SET(client->GetSockFd(), &_readFds);
 					}
 
@@ -146,7 +160,9 @@ namespace
 				}
 
 				// 将allset传入select，而_readFds只保存需要select的值，循环一遍后重新将其赋给allset
-				fd_set allset = _readFds;
+				//fd_set allset = _readFds;
+				//此处使用memcpy fd_set赋值效率
+				memcpy(&allset, &_readFds, sizeof(fd_set));
 
 				timeval t{ 0, 10 };
 				int ret = select(_maxFd + 1, &allset, nullptr, nullptr, &t);
@@ -158,62 +174,27 @@ namespace
 					return;
 				}
 
-				/*#ifdef _WIN32
-						for (size_t i = 0; i < _readFds.fd_count; i++)
-						{
-							SOCKET sock = _readFds.fd_array[i];
-							if (RecvData(sock) == -1)
-							{
-								auto iter = std::find_if(_clients.begin(), _clients.end(), [sock](Client* client)
-									{
-										return client->GetSockFd() == sock;
-									});
-
-								if (iter != _clients.end())
-								{
-									delete (*iter);
-									_clients.erase(iter);
-								}
-							}
-						}
-				#else*/
-				// For Linux, fd_set is different, so need to go through all clients
-				// 为了不在每次clientSock退出时再find遍历一遍，做一下改进
-				// 注意！！！！此处要注意vector在erase时的迭代器陷阱！！！
-				SOCKET sock;
-				for (auto iter = _clients.begin(); iter != _clients.end(); )
+#ifdef _WIN32
+				std::map<SOCKET, Client*>::iterator iter;
+				for (size_t i = 0; i < allset.fd_count; i++)
 				{
-					// 16-Nov-2020  将两个连着的if条件放在一起
-					if (FD_ISSET((sock = (*iter)->GetSockFd()), &allset) && RecvData(*iter) == -1)
+					if ((iter = _clients.find(allset.fd_array[i])) != _clients.end() && RecvData(iter->second) == -1)
 					{
-						FD_CLR(sock, &_readFds);
-						delete (*iter);
-						iter = _clients.erase(iter); // vector在erase以后元素发生移动，后续迭代器失效，erase返回元素移动后有效的下一个元素迭代器，需要重新赋值给iter！！！！！！！！！！
-#ifndef _WIN32
-				// Windows上无需寻找maxFd
-
-				// 修复此处bug，有两处
-				// 1. 在用max_element时lambda函数有两个参数，因此需要保证_clients.size() > 1，否则会有错误
-				// 2. 之前if条件没有!empty(), 会引起段错误, 因为在只有最后一个元素且被erase后，_clients[0]会引起segment fault
-				// 其实这里手动遍历_clients找到最大值就可以了，先不改了作为错误示范
-						if (sock == _maxFd && !_clients.empty())
-						{
-							_maxFd = _clients.size() > 1 ? (*(std::max_element(_clients.begin(), _clients.end(), [](Client* client1, Client* client2)
-								{
-									return client1->GetSockFd() < client2->GetSockFd();
-								})))->GetSockFd() : _clients[0]->GetSockFd();
-
-								// 此时需要判断client socket最大值和server socket谁最大
-								_maxFd = _maxFd < _sock ? _sock : _maxFd;
-						}
-#endif
-						continue;
+						delete iter->second;
+						_event->OnNetLeave(iter->second);
+						_clients.erase(iter);
 					}
-					++iter;
 				}
-			}
+#else
+				// Linux的select与Windows实现不同，windows在fd_set的member-fd_array里存放有所有的socket，不用遍历所有clients判断是否FD_ISSET
+				// Linux上需要遍历所有clients
+				for (auto iter = _clients.begin(); iter != _clients.end();)
+				{
 
-			//#endif              
+				}
+#endif 
+			}
+             
 		}
 
 		inline bool IsRunning()
@@ -235,13 +216,12 @@ namespace
 
 		int RecvData(Client* client)
 		{
-			recvCount++;
-
 			int cmdLen;
 
 			if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
 			{
 				//printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
+				_event->OnNetLeave(client);
 				return -1;
 			}
 
@@ -253,7 +233,7 @@ namespace
 			size_t msgLength;
 			while (client->GetLastPos() >= sizeof(DataHeader) && (client->GetLastPos() >= (msgLength = ((DataHeader*)client->GetMsgBuf())->dataLength)))
 			{
-				OnNetMsg(client->GetSockFd(), client->GetMsgBuf());
+				OnNetMsg(client, (DataHeader*)client->GetMsgBuf());
 				memcpy(client->GetMsgBuf(), client->GetMsgBuf() + msgLength, client->GetLastPos() - msgLength);
 				client->SetLastPos(client->GetLastPos() - msgLength);
 			}
@@ -261,57 +241,9 @@ namespace
 			return 0;
 		}
 
-		virtual void OnNetMsg(SOCKET clientSock, char* header)
+		void OnNetMsg(Client* client, DataHeader* header)
 		{
-			switch (((DataHeader*)header)->cmd)
-			{
-			case CMD_LOGIN:
-			{
-				// �ж��û�������
-				//printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
-
-				LoginResult loginResult;
-				loginResult.result = 1;
-				SendData(clientSock, (const DataHeader*)&loginResult);
-			}
-			break;
-
-			case CMD_LOGOUT:
-			{
-				//printf("User<%d>: %s has logged out\n", clientSock, ((Logout*)header)->userName);
-
-				LogoutResult logoutResult;
-				logoutResult.result = 1;
-				SendData(clientSock, (const DataHeader*)&logoutResult);
-			}
-			break;
-
-			default:
-			{
-				/*DataHeader errheader;
-				errheader.cmd = CMD_ERROR;
-				errheader.dataLength = sizeof(DataHeader);
-				SendData(clientSock, (const DataHeader*)&errheader);*/
-				printf("Server<%d> received undefined message, datalength = %d..\n", _sock, ((DataHeader*)header)->dataLength);
-			}
-			}
-		}
-
-		int SendData(SOCKET clientSock, const DataHeader* header)
-		{
-			if (!IsRunning() || clientSock == INVALID_SOCKET || !header)
-			{
-				printf("Server<%d> send data to client<%d> error...\n", (int)_sock, (int)clientSock);
-				return -1;
-			}
-
-			return (send(clientSock, (const char*)header, header->dataLength, 0));
-		}
-
-		inline void SendDataToAll(const DataHeader* header)
-		{
-			for (auto sock : _clients)
-				SendData(sock->GetSockFd(), header);
+			_event->OnNetMsg(client, header);
 		}
 
 		void Close()
@@ -335,6 +267,7 @@ namespace
 
 	private:
 		SOCKET _sock = INVALID_SOCKET;
+		INetEvent* _event = nullptr;
 		SOCKET _maxFd = INVALID_SOCKET;
 		fd_set _readFds;
 		char _recvBuf[RECVBUFSIZE];
@@ -343,12 +276,14 @@ namespace
 		// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 		// 所以这里使用Client*
 		std::vector<Client*> _clientsBuf;
-		std::vector<Client*> _clients;
+
+		// 24-Nov-2020  由于FD_SET处经常根据socket查询Client*, 此处保存clients的容器由vector改为map，便于查询
+		std::map<SOCKET, Client*> _clients;
 		std::thread _thread;
 	};
 }
 
-class EasyTcpServer
+class EasyTcpServer : public INetEvent
 {
 public:
 	EasyTcpServer()
@@ -445,7 +380,7 @@ public:
 			return INVALID_SOCKET;
 		}
 		AddClientToCell(newClient);
-
+		OnNetJoin(newClient);
 		//printf("Server<%d>: New client join, ip = %s, port = %d\n", _sock, inet_ntop(AF_INET, (const void*)&_clientAddr.sin_addr.S_un, clientAddr, sizeof(clientAddr)), ntohs(_clientAddr.sin_port));
 	}
 
@@ -458,6 +393,7 @@ public:
 				minCellServer = minCellServer->GetClientsNum() < cellServer->GetClientsNum() ? minCellServer : cellServer;
 
 			minCellServer->AddClient(client);
+			OnNetJoin(client);
 		}
 	}
 
@@ -485,7 +421,7 @@ public:
 
 		for (int i = 0; i < THREADS_COUNT; i++)
 		{
-			auto cellServer = new CellServer(_sock);
+			auto cellServer = new CellServer(_sock, this);
 			_cellServers.push_back(cellServer);
 			cellServer->Start();
 		}
@@ -526,11 +462,26 @@ public:
 			size_t totalClientsNum = 0;
 			for (auto cellSer : _cellServers)
 				totalClientsNum += cellSer->GetClientsNum();
-			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %u\n", _sock, tSection, totalClientsNum, recvCount.load());
-			recvCount = 0;
+			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %u\n", _sock, tSection, totalClientsNum, _recvCount.load());
+			_recvCount = 0;
 			_cellTimer.Update();
 		}
 
+	}
+
+	virtual void OnNetMsg(Client* client, DataHeader* header)
+	{
+		_recvCount++;
+	}
+
+	virtual void OnNetLeave(Client* client)
+	{
+		_clientsCount--;
+	}
+
+	virtual void OnNetJoin(Client* client)
+	{
+		_clientsCount++;
 	}
 
 	bool IsRunning()
@@ -540,6 +491,8 @@ public:
 
 private:
 	SOCKET _sock = INVALID_SOCKET;
+	std::atomic_int _recvCount = 0;
+	std::atomic_int _clientsCount = 0;
 
 	CELLTimestamp _cellTimer;
 	std::vector<CellServer*> _cellServers;
