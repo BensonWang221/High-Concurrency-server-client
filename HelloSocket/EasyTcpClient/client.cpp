@@ -9,16 +9,19 @@ $$HISTORY$$
 ====================================================================================================*/
 
 #include "EasyTcpClient.hpp"
+#include "CELLTimestamp.hpp"
 #include <thread>
 #include <atomic>
 
 char userName[32];
 
 Login login; 
-const int clientsCount = 10000;
-const int threadCount = 4;
+const int clientsCount = 1;
+const int threadCount = 1;
 EasyTcpClient* clients[clientsCount];
 std::atomic_int clientNum = 0;
+std::atomic_int sendNum = 0;
+std::atomic_int readyNum = 0;
 
 void cmdThread(EasyTcpClient* client)
 {
@@ -70,18 +73,21 @@ void SendThread(int id)
 
 	for (size_t i = begin; i <= end; i++)
 	{
-		clients[i]->Connect("127.0.0.1", 4567);
+		clients[i]->Connect("192.168.0.109", 4567);
 		printf("Thread %d Number: %u joined...\n", id, i);
 	}
 
-	std::this_thread::sleep_for(std::chrono::seconds(3));
+	readyNum++;
+	while(readyNum < threadCount)
+		std::this_thread::sleep_for(std::chrono::seconds(3));
 
 	while (true)
 	{
 		for (size_t i = begin; i <= end; i++)
 		{
 			//clients[i]->OnRun();
-			clients[i]->SendData((DataHeader*)&login);
+			if (clients[i]->SendData((DataHeader*)&login) != SOCKET_ERROR)
+				sendNum++;
 		};
 	}
 }
@@ -100,6 +106,19 @@ int main()
 	for (int i = 0; i < threadCount; i++)
 	{
 		threads[i] = std::thread(SendThread, i + 1);
+	}
+
+	CELLTimestamp clock;
+
+	while (true)
+	{
+		double duration;
+		if ((duration = clock.GetElapsedTimeInSecond()) >= 1.0)
+		{
+			printf("Clients: duration = %lf\tsendNum = %d\n", duration, sendNum.load());
+			clock.Update();
+			sendNum = 0;
+		}
 	}
 
 	for (auto& thread : threads)

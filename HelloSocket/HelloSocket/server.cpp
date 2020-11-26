@@ -60,15 +60,20 @@ public:
 		}
 		}
 	}
+
+	virtual void OnNetRecv(Client* client)
+	{
+		_recvCount++;
+	}
 };
 
 int main()
 {
 	MyServer server;
 	//server.InitSocket();
-	server.Bind(nullptr, 4567);
+	server.Bind("192.168.0.109", 4567);
 	server.Listen(3000);
-	server.Start();
+	server.Start(1);
 
 	while (true)
 	{

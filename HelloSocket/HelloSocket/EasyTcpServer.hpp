@@ -10,7 +10,7 @@
 21-Nov-2020           1. 改进select的_readFds, 不再每次都重新FDSET, 增加一个备份来传入select
 23-Nov-2020           1. 多线程分组处理客户端数据，使用生产者-消费者模型, 主线程accept，将客户端数据分给四个子线程处理
 24-Nov-2020           1. 添加INetEvent作为EasyTcpServer的纯虚基类
-
+26-Nov-2020           1. 更改存放clients的容器为map，提高查询和删除效率，因为每次的select返回都要从clients去查找，目前性能瓶颈为select
 $$HISTORY$$
 ====================================================================================================*/
 
@@ -108,6 +108,8 @@ namespace
 		virtual void OnNetLeave(Client*) = 0;
 
 		virtual void OnNetMsg(Client*, DataHeader*) = 0;
+
+		virtual void OnNetRecv(Client*) = 0;
 	};
 
 	class CellServer
@@ -164,8 +166,8 @@ namespace
 				//此处使用memcpy fd_set赋值效率
 				memcpy(&allset, &_readFds, sizeof(fd_set));
 
-				timeval t{ 0, 10 };
-				int ret = select(_maxFd + 1, &allset, nullptr, nullptr, &t);
+				//timeval t{ 0, 20 };
+				int ret = select(_maxFd + 1, &allset, nullptr, nullptr, nullptr);
 
 				if (ret < 0)
 				{
@@ -173,6 +175,8 @@ namespace
 					Close();
 					return;
 				}
+				else if (ret == 0)
+					continue;
 
 #ifdef _WIN32
 				std::map<SOCKET, Client*>::iterator iter;
@@ -180,6 +184,7 @@ namespace
 				{
 					if ((iter = _clients.find(allset.fd_array[i])) != _clients.end() && RecvData(iter->second) == -1)
 					{
+						FD_CLR(allset.fd_array[i], &_readFds);
 						delete iter->second;
 						_event->OnNetLeave(iter->second);
 						_clients.erase(iter);
@@ -190,7 +195,15 @@ namespace
 				// Linux上需要遍历所有clients
 				for (auto iter = _clients.begin(); iter != _clients.end();)
 				{
-
+					if (FD_ISSET(iter->first, &allset) && (RecvData(iter->second)) == -1)
+					{
+						FD_CLR(iter->first, &allset);
+						delete iter->second;
+						_event->OnNetLeave(iter->second);
+						_clients.erase(iter++);
+			}
+					else
+						iter++;
 				}
 #endif 
 			}
@@ -211,13 +224,14 @@ namespace
 
 		inline size_t GetClientsNum()
 		{
-			return _clients.size();
+			return _clients.size() + _clientsBuf.size();
 		}
 
 		int RecvData(Client* client)
 		{
 			int cmdLen;
 
+			_event->OnNetRecv(client);
 			if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
 			{
 				//printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
@@ -253,7 +267,7 @@ namespace
 
 			// Close sockets
 			for (auto sock : _clients)
-				delete sock;
+				delete sock.second;
 
 			printf("Server<%d> Going to close..\n", (int)_sock);
 		}
@@ -414,12 +428,12 @@ public:
 		printf("Server<%d> Going to close..\n", (int)_sock);
 	}
 
-	void Start()
+	void Start(int threadCount)
 	{
 		if (_sock == INVALID_SOCKET)
 			return;
 
-		for (int i = 0; i < THREADS_COUNT; i++)
+		for (int i = 0; i < threadCount; i++)
 		{
 			auto cellServer = new CellServer(_sock, this);
 			_cellServers.push_back(cellServer);
@@ -462,8 +476,9 @@ public:
 			size_t totalClientsNum = 0;
 			for (auto cellSer : _cellServers)
 				totalClientsNum += cellSer->GetClientsNum();
-			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %u\n", _sock, tSection, totalClientsNum, _recvCount.load());
+			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %d\tmsgCount: %d\n", _sock, tSection, totalClientsNum, _recvCount.load(), _msgCount.load());
 			_recvCount = 0;
+			_msgCount = 0;
 			_cellTimer.Update();
 		}
 
@@ -471,7 +486,7 @@ public:
 
 	virtual void OnNetMsg(Client* client, DataHeader* header)
 	{
-		_recvCount++;
+		_msgCount++;
 	}
 
 	virtual void OnNetLeave(Client* client)
@@ -489,9 +504,12 @@ public:
 		return (_sock != INVALID_SOCKET);
 	}
 
+protected:
+	std::atomic_int _recvCount = 0;
+
 private:
 	SOCKET _sock = INVALID_SOCKET;
-	std::atomic_int _recvCount = 0;
+	std::atomic_int _msgCount = 0;
 	std::atomic_int _clientsCount = 0;
 
 	CELLTimestamp _cellTimer;
