@@ -11,6 +11,7 @@
 23-Nov-2020           1. 多线程分组处理客户端数据，使用生产者-消费者模型, 主线程accept，将客户端数据分给四个子线程处理
 24-Nov-2020           1. 添加INetEvent作为EasyTcpServer的纯虚基类
 26-Nov-2020           1. 更改存放clients的容器为map，提高查询和删除效率，因为每次的select返回都要从clients去查找，目前性能瓶颈为select
+28-Nov-2020           1. send函数占用时间较多，为减少send函数调用次数，实现定量发送，添加发送缓冲区
 $$HISTORY$$
 ====================================================================================================*/
 
@@ -47,7 +48,8 @@ $$HISTORY$$
 #include "CELLTimestamp.hpp"
 
 #ifndef RECVBUFSIZE
-#define RECVBUFSIZE 10240
+#define RECVBUFSIZE 10240 * 5
+#define SENDBUFSIZE RECVBUFSIZE
 #endif
 
 #define THREADS_COUNT 4
@@ -79,25 +81,70 @@ namespace
 			return (_sockFd = sock);
 		}
 
-		inline size_t GetLastPos() const
+		inline size_t GetLastRecvPos() const
 		{
-			return _lastPos;
+			return _lastRecvPos;
 		}
 
-		inline void SetLastPos(const size_t pos)
+		inline void SetLastRecvPos(const size_t pos)
 		{
-			_lastPos = pos;
+			_lastRecvPos = pos;
 		}
 
-		inline void SendData(const DataHeader* header)
+	    int SendData(const DataHeader* header)
 		{
-			send(_sockFd, (const char*)header, header->dataLength, 0);
+			int ret = SOCKET_ERROR;
+
+			// 需要发送的数据长度
+			int sendLen = (int)(header->dataLength);
+			char* data = (char*)header;
+
+			do {
+				if (_lastSendPos + sendLen > SENDBUFSIZE)
+				{
+					// 只可以拷贝SENDBUFSIZE - _lastSendPos大小的数据
+					const int copyLen = SENDBUFSIZE - _lastSendPos;
+					memcpy(_sendBuf + _lastSendPos, data, SENDBUFSIZE - _lastSendPos);
+					ret = send(_sockFd, _sendBuf, SENDBUFSIZE, 0);
+
+					if (ret == SOCKET_ERROR)
+					{
+						printf("Client<%d> has disconnected...\n");
+						return ret;
+					}
+					data += copyLen;
+					sendLen -= copyLen;
+					_lastSendPos = 0;
+				}
+				else
+				{
+					memcpy(_sendBuf + _lastSendPos, data, sendLen);
+					_lastSendPos += sendLen;
+					sendLen = 0;
+					ret = 0;
+					break;
+				}
+			} while (true);
+
+			return ret;
+		}
+
+		inline size_t GetLastSendPos() const
+		{
+			return _lastSendPos;
+		}
+
+		inline void SetLastSendPos(size_t pos)
+		{
+			_lastSendPos = pos;
 		}
 
 	private:
 		SOCKET _sockFd = INVALID_SOCKET; // client socket
-		size_t _lastPos = 0;
-		char _msgBuf[RECVBUFSIZE * 10] = { 0 };
+		size_t _lastRecvPos = 0;
+		size_t _lastSendPos = 0;
+		char _msgBuf[RECVBUFSIZE] = { 0 };
+		char _sendBuf[SENDBUFSIZE] = { 0 };
 	};
 
 	class INetEvent
@@ -232,24 +279,24 @@ namespace
 			int cmdLen;
 
 			_event->OnNetRecv(client);
-			if ((cmdLen = recv(client->GetSockFd(), _recvBuf, RECVBUFSIZE, 0)) <= 0)
+			if ((cmdLen = recv(client->GetSockFd(), client->GetMsgBuf() + client->GetLastRecvPos(), RECVBUFSIZE - client->GetLastRecvPos(), 0)) <= 0)
 			{
 				//printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
 				_event->OnNetLeave(client);
 				return -1;
 			}
 
-			memcpy(client->GetMsgBuf() + client->GetLastPos(), _recvBuf, (size_t)cmdLen);
-			client->SetLastPos(client->GetLastPos() + cmdLen);
+			//memcpy(client->GetMsgBuf() + client->GetLastRecvPos(), _recvBuf, (size_t)cmdLen);
+			client->SetLastRecvPos(client->GetLastRecvPos() + cmdLen);
 
 			// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
 			// &&的短路运算，第一个条件成立时才判断第二个条件
 			size_t msgLength;
-			while (client->GetLastPos() >= sizeof(DataHeader) && (client->GetLastPos() >= (msgLength = ((DataHeader*)client->GetMsgBuf())->dataLength)))
+			while (client->GetLastRecvPos() >= sizeof(DataHeader) && (client->GetLastRecvPos() >= (msgLength = ((DataHeader*)client->GetMsgBuf())->dataLength)))
 			{
 				OnNetMsg(client, (DataHeader*)client->GetMsgBuf());
-				memcpy(client->GetMsgBuf(), client->GetMsgBuf() + msgLength, client->GetLastPos() - msgLength);
-				client->SetLastPos(client->GetLastPos() - msgLength);
+				memcpy(client->GetMsgBuf(), client->GetMsgBuf() + msgLength, client->GetLastRecvPos() - msgLength);
+				client->SetLastRecvPos(client->GetLastRecvPos() - msgLength);
 			}
 
 			return 0;
@@ -284,7 +331,6 @@ namespace
 		INetEvent* _event = nullptr;
 		SOCKET _maxFd = INVALID_SOCKET;
 		fd_set _readFds;
-		char _recvBuf[RECVBUFSIZE];
 		std::mutex _mutex;
 
 		// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配

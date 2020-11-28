@@ -154,13 +154,13 @@ public:
 		recv(_sock, _recvBuf + sizeof(DataHeader), ((DataHeader*)_recvBuf)->dataLength - sizeof(DataHeader), 0);
 		OnNetMsg((DataHeader*)_recvBuf);*/
 
-		if ((cmdLen = recv(_sock, _recvBuf, RECVBUFSIZE, 0)) <= 0)
+		if ((cmdLen = recv(_sock, _msgBuf + _lastPos, RECVBUFSIZE * 5 - _lastPos, 0)) <= 0)
 		{
 			printf("Disconnect with server, going to close\n");
 			return -1;
 		}
 
-		memcpy(_msgBuf + _lastPos, _recvBuf, (size_t)cmdLen);
+		//memcpy(_msgBuf + _lastPos, _recvBuf, (size_t)cmdLen);
 		_lastPos += cmdLen;
 
 		// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
@@ -232,7 +232,7 @@ private:
 	char _recvBuf[RECVBUFSIZE];
 
 	// 消息缓冲区 - 第二缓冲区
-	char _msgBuf[RECVBUFSIZE * 10];
+	char _msgBuf[RECVBUFSIZE * 5];
 
 	// 上一次消息的头部位置
 	size_t _lastPos = 0;

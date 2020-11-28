@@ -36,7 +36,7 @@ public:
 
 			LoginResult loginResult;
 			loginResult.result = 1;
-			//client->SendData((const DataHeader*)&loginResult);
+			client->SendData((const DataHeader*)&loginResult);
 		}
 		break;
 
@@ -73,7 +73,7 @@ int main()
 	//server.InitSocket();
 	server.Bind("192.168.0.109", 4567);
 	server.Listen(3000);
-	server.Start(1);
+	server.Start(4);
 
 	while (true)
 	{

@@ -16,8 +16,8 @@ $$HISTORY$$
 char userName[32];
 
 Login login; 
-const int clientsCount = 1;
-const int threadCount = 1;
+const int clientsCount = 10000;
+const int threadCount = 4;
 EasyTcpClient* clients[clientsCount];
 std::atomic_int clientNum = 0;
 std::atomic_int sendNum = 0;
@@ -85,7 +85,7 @@ void SendThread(int id)
 	{
 		for (size_t i = begin; i <= end; i++)
 		{
-			//clients[i]->OnRun();
+			clients[i]->OnRun();
 			if (clients[i]->SendData((DataHeader*)&login) != SOCKET_ERROR)
 				sendNum++;
 		};
