@@ -24,9 +24,9 @@ public:
 		EasyTcpServer::OnNetLeave(client);
 	}
 
-	virtual void OnNetMsg(Client* client, DataHeader* header)
+	virtual void OnNetMsg(CellServer* cellServer, Client* client, DataHeader* header)
 	{
-		EasyTcpServer::OnNetMsg(client, header);
+		EasyTcpServer::OnNetMsg(cellServer, client, header);
 		switch ((header)->cmd)
 		{
 		case CMD_LOGIN:
@@ -34,9 +34,11 @@ public:
 			// �ж��û�������
 			//printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
 
-			LoginResult loginResult;
-			loginResult.result = 1;
-			client->SendData((const DataHeader*)&loginResult);
+			//LoginResult loginResult;
+			//loginResult.result = 1;
+			auto result = new LoginResult;
+			result->result = 1;
+			cellServer->AddSendTask(client, static_cast<DataHeader*>(result));
 		}
 		break;
 
@@ -56,14 +58,14 @@ public:
 			errheader.cmd = CMD_ERROR;
 			errheader.dataLength = sizeof(DataHeader);
 			client->SendData((const DataHeader*)&errheader);*/
-			//printf("Server<%d> received undefined message, datalength = %d..\n", _sock, ((DataHeader*)header)->dataLength);
+			printf("Server<%d> received undefined message, datalength = %d..\n", _sock, ((DataHeader*)header)->dataLength);
 		}
 		}
 	}
 
 	virtual void OnNetRecv(Client* client)
 	{
-		_recvCount++;
+		EasyTcpServer::OnNetRecv(client);
 	}
 };
 

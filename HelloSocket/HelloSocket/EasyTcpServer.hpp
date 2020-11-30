@@ -46,6 +46,7 @@ $$HISTORY$$
 #include <functional>
 #include "MessageHeader.hpp"
 #include "CELLTimestamp.hpp"
+#include "CELLTask.hpp"
 
 #ifndef RECVBUFSIZE
 #define RECVBUFSIZE 10240 * 5
@@ -56,6 +57,8 @@ $$HISTORY$$
 
 namespace
 {
+	class CellServer;
+
 	// 客户端对象，包含缓冲区
 	class Client
 	{
@@ -109,7 +112,7 @@ namespace
 
 					if (ret == SOCKET_ERROR)
 					{
-						printf("Client<%d> has disconnected...\n");
+						printf("Client<%d> has disconnected...\n", _sockFd);
 						return ret;
 					}
 					data += copyLen;
@@ -154,9 +157,33 @@ namespace
 
 		virtual void OnNetLeave(Client*) = 0;
 
-		virtual void OnNetMsg(Client*, DataHeader*) = 0;
+		virtual void OnNetMsg(CellServer*, Client*, DataHeader*) = 0;
 
 		virtual void OnNetRecv(Client*) = 0;
+	};
+
+	class CellSendMsgTask : public CellTask
+	{
+	public:
+		CellSendMsgTask(Client* client, DataHeader* header) : _client(client), _header(header) {}
+
+		void DoTask()
+		{
+			if (!_client || !_header)
+			{
+				printf("CellSendMsgTask has not initialized...\n");
+				return;
+			}
+
+			_client->SendData(_header);
+			delete _header;
+			_client = nullptr;
+			_header = nullptr;
+		}
+
+	private:
+		Client* _client = nullptr;
+		DataHeader* _header = nullptr;
 	};
 
 	class CellServer
@@ -266,7 +293,7 @@ namespace
 		{
 			// std::mem_fun, 参数可以是对象指针或对象
 			_thread = std::thread(std::mem_fn(&CellServer::OnRun), this);
-			_thread.detach();
+			_taskServer.Start();
 		}
 
 		inline size_t GetClientsNum()
@@ -304,7 +331,7 @@ namespace
 
 		void OnNetMsg(Client* client, DataHeader* header)
 		{
-			_event->OnNetMsg(client, header);
+			_event->OnNetMsg(this, client, header);
 		}
 
 		void Close()
@@ -326,6 +353,11 @@ namespace
 			_clientsBuf.push_back(client);
 		}
 
+		void AddSendTask(Client* client, DataHeader* header)
+		{
+			_taskServer.AddTask(new CellSendMsgTask(client, header));
+		}
+
 	private:
 		SOCKET _sock = INVALID_SOCKET;
 		INetEvent* _event = nullptr;
@@ -336,6 +368,8 @@ namespace
 		// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 		// 所以这里使用Client*
 		std::vector<Client*> _clientsBuf;
+
+		CellTaskServer _taskServer;
 
 		// 24-Nov-2020  由于FD_SET处经常根据socket查询Client*, 此处保存clients的容器由vector改为map，便于查询
 		std::map<SOCKET, Client*> _clients;
@@ -530,7 +564,7 @@ public:
 
 	}
 
-	virtual void OnNetMsg(Client* client, DataHeader* header)
+	virtual void OnNetMsg(CellServer* cellServer, Client* client, DataHeader* header)
 	{
 		_msgCount++;
 	}
@@ -545,18 +579,23 @@ public:
 		_clientsCount++;
 	}
 
+	virtual void OnNetRecv(Client* client)
+	{
+		_recvCount++;
+	}
+
 	bool IsRunning()
 	{
 		return (_sock != INVALID_SOCKET);
 	}
 
 protected:
-	std::atomic_int _recvCount = 0;
+	SOCKET _sock = INVALID_SOCKET;
 
 private:
-	SOCKET _sock = INVALID_SOCKET;
 	std::atomic_int _msgCount = 0;
 	std::atomic_int _clientsCount = 0;
+	std::atomic_int _recvCount = 0;
 
 	CELLTimestamp _cellTimer;
 	std::vector<CellServer*> _cellServers;
