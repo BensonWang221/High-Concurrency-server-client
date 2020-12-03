@@ -14,17 +14,17 @@ $$HISTORY$$
 class MyServer : public EasyTcpServer
 {
 public:
-	virtual void OnNetJoin(Client* client)
+	virtual void OnNetJoin(std::shared_ptr<Client> client)
 	{
 		EasyTcpServer::OnNetJoin(client);
 	}
 
-	virtual void OnNetLeave(Client* client)
+	virtual void OnNetLeave(std::shared_ptr<Client> client)
 	{
 		EasyTcpServer::OnNetLeave(client);
 	}
 
-	virtual void OnNetMsg(CellServer* cellServer, Client* client, DataHeader* header)
+	virtual void OnNetMsg(CellServer* cellServer, std::shared_ptr<Client> client, DataHeader* header)
 	{
 		EasyTcpServer::OnNetMsg(cellServer, client, header);
 		switch ((header)->cmd)
@@ -63,7 +63,7 @@ public:
 		}
 	}
 
-	virtual void OnNetRecv(Client* client)
+	virtual void OnNetRecv(std::shared_ptr<Client> client)
 	{
 		EasyTcpServer::OnNetRecv(client);
 	}

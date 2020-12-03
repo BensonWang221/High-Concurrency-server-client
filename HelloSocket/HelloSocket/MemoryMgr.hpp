@@ -20,7 +20,7 @@ $$HISTORY$$
 	#define xPrintf
 #endif
 
-const size_t MAX_MEMORY_SIZE = 1024;
+const size_t MAX_MEMORY_SIZE = 128;
 
 class MemoryAlloc;
 
@@ -120,6 +120,7 @@ public:
 
 	void InitMemory()
 	{
+		xPrintf("Init MemoryAlloc: size = %d\n", this->_nSize);
 		assert(_pBuf == nullptr);
 
 		if (_pBuf != nullptr)
@@ -172,7 +173,6 @@ public:
 	// …Í«Îƒ⁄¥Ê
 	void* allocMem(size_t size)
 	{
-		xPrintf("MemoryMgr: size = %d\n", size);
 		if (size <= MAX_MEMORY_SIZE)
 			return _memAllocs[size]->AllocMemory(size);
 
@@ -198,10 +198,11 @@ private:
 	{
 		_mem64.InitMemory();
 		Init(1, 64, &_mem64);
+		_mem128.InitMemory();
 		Init(65, 128, &_mem128);
-		Init(129, 256, &_mem256);
-		Init(257, 512, &_mem512);
-		Init(513, 1024, &_mem1024);
+		//Init(129, 256, &_mem256);
+		//Init(257, 512, &_mem512);
+		//Init(513, 1024, &_mem1024);
 	}
 
 	void Init(size_t nBegin, size_t nEnd, MemoryAlloc* pMemAlloc)
@@ -222,10 +223,10 @@ private:
 	MemoryAlloc _mem1024 = MemoryAlloc(1024, 100);*/
 
 	MemoryAllocator<64, 100000> _mem64;
-	MemoryAllocator<128, 100000> _mem128;
-	MemoryAllocator<256, 100000> _mem256;
-	MemoryAllocator<512, 100000> _mem512;
-	MemoryAllocator<1024, 100000> _mem1024;
+	MemoryAllocator<128, 1000000> _mem128;
+	//MemoryAllocator<256, 100000> _mem256;
+	//MemoryAllocator<512, 100000> _mem512;
+	//MemoryAllocator<1024, 100000> _mem1024;
 
 	MemoryAlloc* _memAllocs[MAX_MEMORY_SIZE + 1];
 };
