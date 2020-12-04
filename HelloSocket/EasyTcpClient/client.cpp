@@ -16,7 +16,7 @@ $$HISTORY$$
 char userName[32];
 
 Login login; 
-const int clientsCount = 1000;
+const int clientsCount = 2000;
 const int threadCount = 4;
 EasyTcpClient* clients[clientsCount];
 std::atomic_int clientNum = 0;
@@ -99,8 +99,8 @@ int main()
 	//EasyTcpClient client;
 	//client.InitSocket();
 	//client.Connect("127.0.0.1", 4567);
-	strcpy_s(login.userName, "Benson");
-	strcpy_s(login.password, "12345678");
+	//strcpy_s(login.userName, "Benson");
+	//strcpy_s(login.password, "12345678");
 	//std::thread t1(cmdThread, &client);
 	//t1.detach();
 

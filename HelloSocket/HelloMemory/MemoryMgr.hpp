@@ -14,10 +14,14 @@ $$HISTORY$$
 #include <mutex>
 
 #ifdef _DEBUG
-#include <iostream>
-	#define xPrintf(...) printf(__VA_ARGS__)
+	#ifndef xPrintf
+		#include <iostream>
+		#define xPrintf(...) printf(__VA_ARGS__)
+	#endif
 #else
-	#define xPrintf
+	#ifndef
+		#define xPrintf
+	#endif
 #endif
 
 const size_t MAX_MEMORY_SIZE = 1024;
