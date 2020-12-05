@@ -86,10 +86,31 @@ public:
 		_lastSendPos = pos;
 	}
 
+	inline void ResetDtHeart()
+	{
+		_dtHeart = 0;
+	}
+
+	// 心跳检测
+	bool HeartCheck(time_t dt)
+	{
+		if ((_dtHeart += dt) >= CLIENT_HEART_DEAD_TIME)
+		{
+			printf("Client<%d> heart check dead, time = %lld\n", _sockFd, _dtHeart);
+			return true;
+		}
+
+		return false;
+	}
+
 private:
 	SOCKET _sockFd = INVALID_SOCKET; // client socket
 	size_t _lastRecvPos = 0;
 	size_t _lastSendPos = 0;
+
+	// 心跳计时
+	time_t _dtHeart = 0;
+
 	char _msgBuf[RECVBUFSIZE] = { 0 };
 	char _sendBuf[SENDBUFSIZE] = { 0 };
 };

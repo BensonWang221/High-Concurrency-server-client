@@ -27,6 +27,10 @@
 #define SENDBUFSIZE RECVBUFSIZE
 #endif
 
+#ifndef CLIENT_HEART_DEAD_TIME
+#define CLIENT_HEART_DEAD_TIME 5000
+#endif
+
 class Client;
 class CellServer;
 class INetEvent;

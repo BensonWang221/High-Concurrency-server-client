@@ -1,3 +1,11 @@
+/*==================================================================================================
+   Date                        Description of Change
+06-Dec-2020           1. ①First version, 将各个类分开实现，优化代码结构
+                         ②为每个客户端添加心跳检测heart check
+
+$$HISTORY$$
+====================================================================================================*/
+
 #ifndef _CELL_SERVER_INCLUDED
 #define _CELL_SERVER_INCLUDED
 
@@ -65,7 +73,7 @@ public:
 			//此处使用memcpy fd_set赋值效率
 			memcpy(&allset, &_readFds, sizeof(fd_set));
 
-			timeval t{ 0, 10 };
+			timeval t{ 0, 1 };
 			int ret = select(_maxFd + 1, &allset, nullptr, nullptr, &t);
 
 			if (ret < 0)
@@ -74,39 +82,66 @@ public:
 				Close();
 				return;
 			}
-			else if (ret == 0)
-				continue;
+			//else if (ret == 0)
+			//	continue;
+			ReadData(allset);
+
+			// Heart check for every client
+			CheckHeartForClient();
+		}
+	}
+
+	void ReadData(fd_set& allset)
+	{
 
 #ifdef _WIN32
-			std::map<SOCKET, Client*>::iterator iter;
-			for (size_t i = 0; i < allset.fd_count; i++)
+		std::map<SOCKET, Client*>::iterator iter;
+		for (size_t i = 0; i < allset.fd_count; i++)
+		{
+			if ((iter = _clients.find(allset.fd_array[i])) != _clients.end() && RecvData(iter->second) == -1)
 			{
-				if ((iter = _clients.find(allset.fd_array[i])) != _clients.end() && RecvData(iter->second) == -1)
-				{
-					FD_CLR(allset.fd_array[i], &_readFds);
-					delete iter->second;
-					_event->OnNetLeave(iter->second);
-					_clients.erase(iter);
-				}
+				EraseClient(iter->second);
+				_clients.erase(iter);
 			}
-#else
-			// Linux的select与Windows实现不同，windows在fd_set的member-fd_array里存放有所有的socket，不用遍历所有clients判断是否FD_ISSET
-			// Linux上需要遍历所有clients
-			for (auto iter = _clients.begin(); iter != _clients.end();)
-			{
-				if (FD_ISSET(iter->first, &allset) && (RecvData(iter->second)) == -1)
-				{
-					FD_CLR(iter->first, &allset);
-					delete iter->second;
-					_event->OnNetLeave(iter->second);
-					_clients.erase(iter++);
-				}
-				else
-					iter++;
-			}
-#endif 
 		}
+#else
+		// Linux的select与Windows实现不同，windows在fd_set的member-fd_array里存放有所有的socket，不用遍历所有clients判断是否FD_ISSET
+		// Linux上需要遍历所有clients
+		for (auto iter = _clients.begin(); iter != _clients.end();)
+		{
+			if (FD_ISSET(iter->first, &allset) && (RecvData(iter->second)) == -1)
+			{
+				EraseClient(iter->second);
+				_clients.erase(iter++);
+			}
+			else
+				iter++;
+		}
+#endif 
+	}
 
+	void CheckHeartForClient()
+	{
+		auto currentTime = CELLTime::GetCurrentTimeInMilliSec();
+		for (auto iter = _clients.begin(); iter != _clients.end();)
+		{
+			if (iter->second->HeartCheck(currentTime - _heartCheckTime))
+			{
+				EraseClient(iter->second);
+				_clients.erase(iter++);
+			}
+
+			else
+				iter++;
+		}
+		_heartCheckTime = currentTime;
+	}
+
+	inline void EraseClient(Client* client)
+	{
+		_event->OnNetLeave(client);
+		FD_CLR(client->GetSockFd(), &_readFds);
+		delete client;
 	}
 
 	inline bool IsRunning()
@@ -165,8 +200,8 @@ public:
 			return;
 
 		// Close sockets
-		/*for (auto sock : _clients)
-			delete sock.second;*/
+		for (auto sock : _clients)
+			delete sock.second;
 
 		printf("Server<%d> Going to close..\n", (int)_sock);
 	}
@@ -178,14 +213,15 @@ public:
 		_clientsBuf.push_back(client);
 	}
 
-	void AddSendTask(Client* client, DataHeader* header)
-	{
-		_taskServer.AddTask([client, header]()
-			{
-				client->SendData(header);
-				delete header;
-			});
-	}
+	//void AddSendTask(Client* client, DataHeader* header)
+	//{
+	//	// 使用lambda表达式来代替原有new一个send task，更简洁，效率更高
+	//	_taskServer.AddTask([client, header]()
+	//		{
+	//			client->SendData(header);
+	//			delete header;
+	//		});
+	//}
 
 private:
 	SOCKET _sock = INVALID_SOCKET;
@@ -193,6 +229,8 @@ private:
 	SOCKET _maxFd = 0;
 	fd_set _readFds;
 	std::mutex _mutex;
+
+	time_t _heartCheckTime = CELLTime::GetCurrentTimeInMilliSec();
 
 	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 	// 所以这里使用Client*

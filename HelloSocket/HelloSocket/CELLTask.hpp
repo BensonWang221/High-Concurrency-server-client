@@ -2,6 +2,7 @@
    Date                        Description of Change
 30-Nov-2020           1. ① First version
                          ② 设置Task类，用于分离send函数到独立线程中
+05-Dec-2020           1. 使用std::function来代替原有class
 $$HISTORY$$
 ====================================================================================================*/
 #ifndef _CELL_TASK_INCLUDED

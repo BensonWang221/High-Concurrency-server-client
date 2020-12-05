@@ -15,7 +15,7 @@ $$HISTORY$$
 
 char userName[32];
 
-Login login[10]; 
+Login login; 
 const int clientsCount = 1000;
 const int threadCount = 4;
 EasyTcpClient* clients[clientsCount];
@@ -63,6 +63,15 @@ void cmdThread(EasyTcpClient* client)
 	}
 }
 
+void RecvThread(size_t begin, size_t end)
+{
+	while (true)
+	{
+		for (size_t i = begin; i <= end; i++)
+			clients[i]->OnRun();
+	}
+}
+
 void SendThread(int id)
 {
 	size_t begin = clientsCount / threadCount * (id - 1);
@@ -81,15 +90,15 @@ void SendThread(int id)
 	while(readyNum < threadCount)
 		std::this_thread::sleep_for(std::chrono::seconds(3));
 
+	std::thread t(RecvThread, begin, end);
+
 	while (true)
 	{
 		for (size_t i = begin; i <= end; i++)
 		{
 
-			if (clients[i]->SendData((DataHeader*)login) != SOCKET_ERROR)
-				sendNum++;
-
-			clients[i]->OnRun();	
+			if (clients[i]->SendData((DataHeader*)&login) != SOCKET_ERROR)
+				sendNum++;	
 		};
 	}
 }

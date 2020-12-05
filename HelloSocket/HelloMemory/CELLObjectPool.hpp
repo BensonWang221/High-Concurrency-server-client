@@ -1,7 +1,7 @@
 /*==================================================================================================
    Date                        Description of Change
 05-Dec-2020           1. ①First version
-					     ②实现对象池
+						 ②实现对象池
 05-Dec-2020           1. 智能指针在搭配对象池时，不能使用std::make_shared
 
 $$HISTORY$$
@@ -14,14 +14,14 @@ $$HISTORY$$
 #include <assert.h>
 
 #ifdef _DEBUG
-	#ifndef xPrintf
-		#include <stdio.h>
-		#define xPrintf(...) printf(__VA_ARGS__)
-	#endif
+#ifndef xPrintf
+#include <stdio.h>
+#define xPrintf(...) printf(__VA_ARGS__)
+#endif
 #else
-	#ifndef _xPrintf
-		#define xPrintf(...) 
-	#endif
+#ifndef _xPrintf
+#define xPrintf(...) 
+#endif
 #endif
 
 template <class Type, size_t nPoolNum>
@@ -52,7 +52,7 @@ public:
 		result->nRef = 1;
 		_pHeader = _pHeader->pNext;
 
-		xPrintf("allocObject: size = %d, id = %d\n", nSize, result->nID);
+		printf("allocObject: size = %d, id = %d\n", nSize, result->nID);
 
 		return reinterpret_cast<char*>(result) + sizeof(NodeHeader);
 	}
@@ -65,7 +65,7 @@ public:
 		header->inPool = false;
 		header->pNext = nullptr;
 
-		xPrintf("Object Pool: allocOutOfPool\n");
+		//xPrintf("Object Pool: allocOutOfPool\n");
 
 		return reinterpret_cast<char*>(header) + sizeof(NodeHeader);
 	}
@@ -73,7 +73,7 @@ public:
 	void freeObject(void* pObj)
 	{
 		auto p = reinterpret_cast<NodeHeader*>(static_cast<char*>(pObj) - sizeof(NodeHeader));
-		
+
 		std::lock_guard<std::mutex> lock(_mutex);
 		if (p->inPool)
 		{

@@ -212,7 +212,7 @@ public:
 	inline int SendData(DataHeader* header)
 	{
 		if (IsRunning() && header)
-			return send(_sock, (const char*)header, header->dataLength * 10, 0);
+			return send(_sock, (const char*)header, header->dataLength, 0);
 
 		return SOCKET_ERROR;
 	}
@@ -229,10 +229,10 @@ private:
 	SOCKET _sock = INVALID_SOCKET;
 
 	// 接收缓冲区
-	char _recvBuf[RECVBUFSIZE];
+	//char _recvBuf[RECVBUFSIZE];
 
 	// 消息缓冲区 - 第二缓冲区
-	char _msgBuf[RECVBUFSIZE * 5];
+	char _msgBuf[RECVBUFSIZE];
 
 	// 上一次消息的头部位置
 	size_t _lastPos = 0;

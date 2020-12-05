@@ -34,11 +34,12 @@ public:
 			// �ж��û�������
 			//printf("User: %s, password: %s has logged in\n", ((Login*)header)->userName, ((Login*)header)->password);
 
-			//LoginResult loginResult;
-			//loginResult.result = 1;
-			auto result = new LoginResult;
-			result->result = 1;
-			cellServer->AddSendTask(client, static_cast<DataHeader*>(result));
+			LoginResult loginResult;
+			loginResult.result = 1;
+			client->SendData(&loginResult);
+			//auto result = new LoginResult;
+			//result->result = 1;
+			//cellServer->AddSendTask(client, static_cast<DataHeader*>(result));
 		}
 		break;
 
