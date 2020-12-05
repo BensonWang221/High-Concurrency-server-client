@@ -13,29 +13,14 @@ $$HISTORY$$
 #include <list>
 #include <functional>
 #include <memory>
-
-extern class CellSendMsgTask;
-
-
-// 任务基类
-class CellTask
-{
-public:
-	CellTask() {}
-
-	virtual  ~CellTask() {}
-
-	virtual void DoTask() {}
-
-private:
-};
-
-using CellTaskPtr = std::shared_ptr<CellTask>;
+#include "CELLClient.hpp"
 
 class CellTaskServer
 {
+	using CellTask = std::function<void()>;
+
 public:
-	inline void AddTask(CellTaskPtr task)
+	inline void AddTask(CellTask task)
 	{
 		std::lock_guard<std::mutex> lock(_mutex);
 		_tasksBuf.push_back(task);
@@ -71,15 +56,15 @@ protected:
 
 			for (auto task : _tasksList)
 			{
-				task->DoTask();
+				task();
 			}
 			_tasksList.clear();
 		}
 	}
 
 private:
-	std::list<CellTaskPtr> _tasksList;
-	std::list<CellTaskPtr> _tasksBuf;
+	std::list<CellTask> _tasksList;
+	std::list<CellTask> _tasksBuf;
 	std::mutex _mutex;
 };
 

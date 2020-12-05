@@ -20,371 +20,23 @@ $$HISTORY$$
 #ifndef _EASY_TCP_SERVER_INCLUDED
 #define _EASY_TCP_SERVER_INCLUDED
 
-#ifdef _WIN32
-	#define FD_SETSIZE      2506
-	#define WIN32_LEAN_AND_MEAN
-	#include <WinSock2.h>
-	#include <WS2tcpip.h>
-	#include <Windows.h>
-	#pragma comment(lib, "ws2_32.lib")
-#else
-	#include <unistd.h>
-	#include <arpa/inet.h>
-	#include <string.h>
-	#define SOCKET int
-	#define INVALID_SOCKET  (SOCKET)(~0)
-	#define SOCKET_ERROR            (-1)
-	#define strcpy_s strcpy
-	#define closksocket close
-#endif
+#include "Cell.h"
 #include <algorithm>
 #include <stdlib.h>
-#include <iostream>
 #include <vector>
 #include <map>
 #include <thread>
 #include <mutex>
 #include <atomic>
 #include <functional>
-#include "MessageHeader.hpp"
 #include "CELLTimestamp.hpp"
 #include "CELLTask.hpp"
-#include "Allocator.h"
-#include "CELLObjectPool.hpp"
-
-#ifndef RECVBUFSIZE
-#define RECVBUFSIZE 10240 * 5
-#define SENDBUFSIZE RECVBUFSIZE
-#endif
+#include "CELLClient.hpp"
+#include "INetEvent.hpp"
+#include "CELLServer.hpp"
 
 #define THREADS_COUNT 4
 
-class CellSendMsgTask;
-namespace
-{
-	class Client : public ObjectPoolBase<Client, 10000>
-	{
-	public:
-		virtual ~Client()
-		{
-			if (_sockFd != INVALID_SOCKET)
-				closesocket(_sockFd);
-		}
-
-		inline SOCKET GetSockFd() const
-		{
-			return _sockFd;
-		}
-
-		inline char* GetMsgBuf()
-		{
-			return _msgBuf;
-		}
-
-		inline SOCKET SetSockFd(const SOCKET sock)
-		{
-			return (_sockFd = sock);
-		}
-
-		inline size_t GetLastRecvPos() const
-		{
-			return _lastRecvPos;
-		}
-
-		inline void SetLastRecvPos(const size_t pos)
-		{
-			_lastRecvPos = pos;
-		}
-
-		int SendData(const DataHeader* header)
-		{
-			int ret = SOCKET_ERROR;
-
-			// 需要发送的数据长度
-			int sendLen = (int)(header->dataLength);
-			char* data = (char*)header;
-
-			do {
-				if (_lastSendPos + sendLen > SENDBUFSIZE)
-				{
-					// 只可以拷贝SENDBUFSIZE - _lastSendPos大小的数据
-					const int copyLen = SENDBUFSIZE - _lastSendPos;
-					memcpy(_sendBuf + _lastSendPos, data, SENDBUFSIZE - _lastSendPos);
-					ret = send(_sockFd, _sendBuf, SENDBUFSIZE, 0);
-
-					if (ret == SOCKET_ERROR)
-					{
-						printf("Client<%d> has disconnected...\n", _sockFd);
-						return ret;
-					}
-					data += copyLen;
-					sendLen -= copyLen;
-					_lastSendPos = 0;
-				}
-				else
-				{
-					memcpy(_sendBuf + _lastSendPos, data, sendLen);
-					_lastSendPos += sendLen;
-					sendLen = 0;
-					ret = 0;
-					break;
-				}
-			} while (true);
-
-			return ret;
-		}
-
-		inline size_t GetLastSendPos() const
-		{
-			return _lastSendPos;
-		}
-
-		inline void SetLastSendPos(size_t pos)
-		{
-			_lastSendPos = pos;
-		}
-
-	private:
-		SOCKET _sockFd = INVALID_SOCKET; // client socket
-		size_t _lastRecvPos = 0;
-		size_t _lastSendPos = 0;
-		char _msgBuf[RECVBUFSIZE] = { 0 };
-		char _sendBuf[SENDBUFSIZE] = { 0 };
-	};
-}
-
-class CellSendMsgTask : public CellTask
-{
-public:
-	CellSendMsgTask(std::shared_ptr<Client> client, DataHeader* header) : _client(client), _header(header) {}
-
-	void DoTask()
-	{
-		if (!_client || !_header)
-		{
-			printf("CellSendMsgTask has not initialized...\n");
-			return;
-		}
-
-		_client->SendData(_header);
-		_client = nullptr;
-		_header = nullptr;
-	}
-
-private:
-	std::shared_ptr<Client> _client = nullptr;
-	DataHeader* _header = nullptr;
-};
-
-
-namespace
-{
-	class CellServer;
-	// 客户端对象，包含缓冲区
-	
-
-	class INetEvent
-	{
-	public:
-		virtual void OnNetJoin(std::shared_ptr<Client>) = 0;
-
-		virtual void OnNetLeave(std::shared_ptr<Client>) = 0;
-
-		virtual void OnNetMsg(CellServer*, std::shared_ptr<Client>, DataHeader*) = 0;
-
-		virtual void OnNetRecv(std::shared_ptr<Client>) = 0;
-	};
-
-	class CellServer
-	{
-	public:
-		CellServer(SOCKET sock, INetEvent* event) : _sock(sock), _event(event)
-		{
-			FD_ZERO(&_readFds);
-		}
-
-		~CellServer()
-		{
-			//if (_sock != INVALID_SOCKET && !_clients.empty())
-			//{
-			//	for (auto& client : _clients)
-			//	{
-			//		delete client.second;
-			//		_sock = INVALID_SOCKET;
-			//	}
-			//}
-		}
-
-		void OnRun()
-		{
-			fd_set allset;
-			while (true)
-			{
-				if (!IsRunning())
-					return;
-
-				// 从_clientsBuf中取出所有可用的client
-				if (!_clientsBuf.empty())
-				{
-					std::lock_guard<std::mutex> lock(_mutex);
-					for (auto client : _clientsBuf)
-					{
-						_maxFd = _maxFd > client->GetSockFd() ? _maxFd : client->GetSockFd();
-						_clients[client->GetSockFd()] = client;
-						FD_SET(client->GetSockFd(), &_readFds);
-					}
-
-					//std::cout << "Thread: " << std::this_thread::get_id() << " added " << _clientsBuf.size() << " clients\n";
-					_clientsBuf.clear();
-				}
-
-				if (_clients.empty())
-				{
-					std::this_thread::sleep_for(std::chrono::milliseconds(1));
-					continue;
-				}
-
-				// 将allset传入select，而_readFds只保存需要select的值，循环一遍后重新将其赋给allset
-				//fd_set allset = _readFds;
-				//此处使用memcpy fd_set赋值效率
-				memcpy(&allset, &_readFds, sizeof(fd_set));
-
-				timeval t{ 0, 10 };
-				int ret = select(_maxFd + 1, &allset, nullptr, nullptr, &t);
-
-				if (ret < 0)
-				{
-					printf("Thread: select error\n");
-					Close();
-					return;
-				}
-				else if (ret == 0)
-					continue;
-
-#ifdef _WIN32
-				std::map<SOCKET, std::shared_ptr<Client>>::iterator iter;
-				for (size_t i = 0; i < allset.fd_count; i++)
-				{
-					if ((iter = _clients.find(allset.fd_array[i])) != _clients.end() && RecvData(iter->second) == -1)
-					{
-						FD_CLR(allset.fd_array[i], &_readFds);
-						//delete iter->second;
-						_event->OnNetLeave(iter->second);
-						_clients.erase(iter);
-					}
-				}
-#else
-				// Linux的select与Windows实现不同，windows在fd_set的member-fd_array里存放有所有的socket，不用遍历所有clients判断是否FD_ISSET
-				// Linux上需要遍历所有clients
-				for (auto iter = _clients.begin(); iter != _clients.end();)
-				{
-					if (FD_ISSET(iter->first, &allset) && (RecvData(iter->second)) == -1)
-					{
-						FD_CLR(iter->first, &allset);
-						delete iter->second;
-						_event->OnNetLeave(iter->second);
-						_clients.erase(iter++);
-			}
-					else
-						iter++;
-				}
-#endif 
-			}
-             
-		}
-
-		inline bool IsRunning()
-		{
-			return (_sock != INVALID_SOCKET);
-		}
-
-		void Start()
-		{
-			// std::mem_fun, 参数可以是对象指针或对象
-			_thread = std::thread(std::mem_fn(&CellServer::OnRun), this);
-			_taskServer.Start();
-		}
-
-		inline size_t GetClientsNum()
-		{
-			return _clients.size() + _clientsBuf.size();
-		}
-
-		int RecvData(std::shared_ptr<Client> client)
-		{
-			int cmdLen;
-
-			_event->OnNetRecv(client);
-			if ((cmdLen = recv(client->GetSockFd(), client->GetMsgBuf() + client->GetLastRecvPos(), RECVBUFSIZE - client->GetLastRecvPos(), 0)) <= 0)
-			{
-				//printf("Server<%d>: client<%d> has disconnected...\n", (int)_sock, (int)client->GetSockFd());
-				_event->OnNetLeave(client);
-				return -1;
-			}
-
-			//memcpy(client->GetMsgBuf() + client->GetLastRecvPos(), _recvBuf, (size_t)cmdLen);
-			client->SetLastRecvPos(client->GetLastRecvPos() + cmdLen);
-
-			// 当消息缓冲区的数据长度大于一个Dataheader的长度， 而且大于消息长度的时候
-			// &&的短路运算，第一个条件成立时才判断第二个条件
-			size_t msgLength;
-			while (client->GetLastRecvPos() >= sizeof(DataHeader) && (client->GetLastRecvPos() >= (msgLength = ((DataHeader*)client->GetMsgBuf())->dataLength)))
-			{
-				OnNetMsg(client, (DataHeader*)client->GetMsgBuf());
-				memcpy(client->GetMsgBuf(), client->GetMsgBuf() + msgLength, client->GetLastRecvPos() - msgLength);
-				client->SetLastRecvPos(client->GetLastRecvPos() - msgLength);
-			}
-
-			return 0;
-		}
-
-		void OnNetMsg(std::shared_ptr<Client> client, DataHeader* header)
-		{
-			_event->OnNetMsg(this, client, header);
-		}
-
-		void Close()
-		{
-			if (_sock == INVALID_SOCKET)
-				return;
-
-			// Close sockets
-			/*for (auto sock : _clients)
-				delete sock.second;*/
-
-			printf("Server<%d> Going to close..\n", (int)_sock);
-		}
-
-		void AddClient(std::shared_ptr<Client> client)
-		{
-			// 实际应用此处可以对client进行验证，是否为非法链接
-			std::lock_guard<std::mutex> lg(_mutex);
-			_clientsBuf.push_back(client);
-		}
-
-		void AddSendTask(std::shared_ptr<Client> client, DataHeader* header)
-		{
-			_taskServer.AddTask(std::make_shared<CellSendMsgTask>(client, header));
-		}
-
-	private:
-		SOCKET _sock = INVALID_SOCKET;
-		INetEvent* _event = nullptr;
-		SOCKET _maxFd = 0;
-		fd_set _readFds;
-		std::mutex _mutex;
-
-		// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
-		// 所以这里使用std::shared_ptr<Client>
-		std::vector<std::shared_ptr<Client>> _clientsBuf;
-
-		CellTaskServer _taskServer;
-
-		// 24-Nov-2020  由于FD_SET处经常根据socket查询std::shared_ptr<Client>, 此处保存clients的容器由vector改为map，便于查询
-		std::map<SOCKET, std::shared_ptr<Client>> _clients;
-		std::thread _thread;
-	};
-}
 
 class EasyTcpServer : public INetEvent
 {
@@ -475,7 +127,7 @@ public:
 		sockaddr_in _clientAddr = {};
 		socklen_t _clientAddrLen = sizeof(_clientAddr);
 		//auto newClient = std::make_shared<Client>();
-		std::shared_ptr<Client> newClient(new Client());
+		Client* newClient(new Client());
 
 		//char clientAddr[1024];
 		if ((newClient->SetSockFd(accept(_sock, (sockaddr*)&_clientAddr, &_clientAddrLen))) == INVALID_SOCKET)
@@ -488,7 +140,7 @@ public:
 		//printf("Server<%d>: New client join, ip = %s, port = %d\n", _sock, inet_ntop(AF_INET, (const void*)&_clientAddr.sin_addr.S_un, clientAddr, sizeof(clientAddr)), ntohs(_clientAddr.sin_port));
 	}
 
-	void AddClientToCell(std::shared_ptr<Client> client)
+	void AddClientToCell(Client* client)
 	{
 		if (!_cellServers.empty())
 		{
@@ -521,7 +173,7 @@ public:
 		for (int i = 0; i < threadCount; i++)
 		{
 			//auto cellServer = new CellServer(_sock, this);
-			_cellServers.push_back(std::make_shared<CellServer>(_sock, this));
+			_cellServers.push_back(new CellServer(_sock, this));
 		}
 
 		for (auto& cellServer : _cellServers)
@@ -571,22 +223,22 @@ public:
 
 	}
 
-	virtual void OnNetMsg(CellServer* cellServer, std::shared_ptr<Client> client, DataHeader* header)
+	virtual void OnNetMsg(CellServer* cellServer, Client* client, DataHeader* header)
 	{
 		_msgCount++;
 	}
 
-	virtual void OnNetLeave(std::shared_ptr<Client> client)
+	virtual void OnNetLeave(Client* client)
 	{
 		_clientsCount--;
 	}
 
-	virtual void OnNetJoin(std::shared_ptr<Client> client)
+	virtual void OnNetJoin(Client* client)
 	{
 		_clientsCount++;
 	}
 
-	virtual void OnNetRecv(std::shared_ptr<Client> client)
+	virtual void OnNetRecv(Client* client)
 	{
 		_recvCount++;
 	}
@@ -597,15 +249,15 @@ public:
 	}
 
 protected:
+	std::atomic_int _recvCount = 0;
 	SOCKET _sock = INVALID_SOCKET;
 
 private:
 	std::atomic_int _msgCount = 0;
 	std::atomic_int _clientsCount = 0;
-	std::atomic_int _recvCount = 0;
 
 	CELLTimestamp _cellTimer;
-	std::vector<std::shared_ptr<CellServer>> _cellServers;
+	std::vector<CellServer*> _cellServers;
 };
 
 #endif
