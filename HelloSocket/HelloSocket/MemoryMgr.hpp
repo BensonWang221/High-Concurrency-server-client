@@ -66,14 +66,17 @@ public:
 		MemoryBlock* pResult = nullptr;
 
 		if (_pHeader == nullptr)
+		{
+			//printf("AllocMemory: Run out of total memory pool, size = %d\n", size);
 			return AllocOutOfPool(size);
+		}
 
 		pResult = _pHeader;
 		_pHeader = _pHeader->pNext;
 		assert(pResult->nRef == 0);
 		pResult->nRef = 1;
 
-		xPrintf("AllocMemory:  %p, id = %d, size = %d\n", pResult, pResult->nID, size);
+		//xPrintf("AllocMemory:  %p, id = %d, size = %d\n", pResult, pResult->nID, size);
 
 		return reinterpret_cast<char*>(pResult) + sizeof(MemoryBlock);
 	}
@@ -87,7 +90,7 @@ public:
 		pResult->pAlloc = this;
 		pResult->pNext = nullptr;
 
-		xPrintf("AllocOutOfPool: %p, id = %d, size = %d\n", pResult, pResult->nID, size);
+		//xPrintf("AllocOutOfPool: %p, id = %d, size = %d\n", pResult, pResult->nID, size);
 
 		return reinterpret_cast<char*>(pResult) + sizeof(MemoryBlock);
 	}
@@ -97,7 +100,7 @@ public:
 	{
 		MemoryBlock* pData = reinterpret_cast<MemoryBlock*>(static_cast<char*>(p) - sizeof(MemoryBlock));
 
-		xPrintf("FreeMemory:  %p, id = %d\n", pData, pData->nID);
+		//xPrintf("FreeMemory:  %p, id = %d\n", pData, pData->nID);
 
 		assert(pData->nRef == 1);
 
@@ -120,7 +123,7 @@ public:
 
 	void InitMemory()
 	{
-		xPrintf("Init MemoryAlloc: size = %d\n", this->_nSize);
+		//xPrintf("Init MemoryAlloc: size = %d\n", this->_nSize);
 		assert(_pBuf == nullptr);
 
 		if (_pBuf != nullptr)
@@ -222,7 +225,7 @@ private:
 	MemoryAlloc _mem512 = MemoryAlloc(512, 100);
 	MemoryAlloc _mem1024 = MemoryAlloc(1024, 100);*/
 
-	MemoryAllocator<64, 100000> _mem64;
+	MemoryAllocator<64, 4000000> _mem64;
 	MemoryAllocator<128, 1000000> _mem128;
 	//MemoryAllocator<256, 100000> _mem256;
 	//MemoryAllocator<512, 100000> _mem512;

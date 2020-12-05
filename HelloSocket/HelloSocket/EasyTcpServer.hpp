@@ -50,6 +50,7 @@ $$HISTORY$$
 #include "CELLTimestamp.hpp"
 #include "CELLTask.hpp"
 #include "Allocator.h"
+#include "CELLObjectPool.hpp"
 
 #ifndef RECVBUFSIZE
 #define RECVBUFSIZE 10240 * 5
@@ -61,7 +62,7 @@ $$HISTORY$$
 class CellSendMsgTask;
 namespace
 {
-	class Client
+	class Client : public ObjectPoolBase<Client, 10000>
 	{
 	public:
 		virtual ~Client()
@@ -473,7 +474,8 @@ public:
 	{
 		sockaddr_in _clientAddr = {};
 		socklen_t _clientAddrLen = sizeof(_clientAddr);
-		auto newClient = std::make_shared<Client>();
+		//auto newClient = std::make_shared<Client>();
+		std::shared_ptr<Client> newClient(new Client());
 
 		//char clientAddr[1024];
 		if ((newClient->SetSockFd(accept(_sock, (sockaddr*)&_clientAddr, &_clientAddrLen))) == INVALID_SOCKET)

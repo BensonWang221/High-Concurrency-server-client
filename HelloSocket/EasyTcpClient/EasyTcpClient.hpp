@@ -212,7 +212,7 @@ public:
 	inline int SendData(DataHeader* header)
 	{
 		if (IsRunning() && header)
-			return send(_sock, (const char*)header, header->dataLength, 0);
+			return send(_sock, (const char*)header, header->dataLength * 10, 0);
 
 		return SOCKET_ERROR;
 	}

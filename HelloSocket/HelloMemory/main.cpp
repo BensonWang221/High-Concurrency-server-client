@@ -7,18 +7,44 @@
 #include "CELLObjectPool.hpp"
 using namespace std;
 
-const int threadNum = 8;
-const int memCount = 100000;
+const int threadNum = 4;
+const int memCount = 16;
 const int aveCount = memCount / threadNum;
+
+class A : public ObjectPoolBase<A, 5>
+{
+public:
+	A(int a) : _a(a) 
+	{
+		cout << "A(int)...\n";
+	}
+
+	~A()
+	{
+		cout << "~A()...\n";
+	}
+
+private:
+	int _a;
+};
+
+class B : public ObjectPoolBase<B, 20>
+{
+public:
+	B(int a, int b) : _a(a), _b(b) {}
+private:
+	int _a;
+	int _b;
+};
 
 void ThreadFun()
 {
-	char* data[aveCount];
+	A* data[aveCount];
 	for (int i = 0; i < aveCount; ++i)
-		data[i] = new char((rand() % 127) + 1);
+		data[i] = A::createObject(5);
 
 	for (int i = 0; i < aveCount; i++)
-		delete[] data[i];
+		A::destroyObject(data[i]);
 }
 
 class Test
@@ -34,23 +60,6 @@ public:
 		cout << "~Test()...\n";
 	}
 private:
-};
-
-class A : public ObjectPoolBase<A, 10>
-{
-public:
-	A(int a) : _a(a) {}
-private:
-	int _a;
-};
-
-class B : public ObjectPoolBase<B, 20>
-{
-public:
-	B(int a, int b) : _a(a), _b(b) {}
-private:
-	int _a;
-	int _b;
 };
 
 void fun(std::shared_ptr<Test> a)
@@ -72,9 +81,9 @@ int main()
 	std::shared_ptr<int> b = std::make_shared<int>();
 
 	std::shared_ptr<Test> t = std::make_shared<Test>(10, 20);
-	fun(t);*/
+	fun(t);
 
-	auto a1 = new A(5);
+	/*auto a1 = new A(5);
 	delete a1;
 
 	auto a2 = A::createObject(5);
@@ -82,7 +91,16 @@ int main()
 	A::destroyObject(a2);
 
 	auto b = B::createObject(5, 6);
-	B::destroyObject(b);
+	B::destroyObject(b);*/
+
+	A* a1 = new A(10);
+	delete a1;
+
+	{
+		std::shared_ptr<A> a2(new A(10));
+	}
+	std::cout << "---------------\n";
+	std::shared_ptr<A> a3(new A(10));;
 
 	return 0;
 } 

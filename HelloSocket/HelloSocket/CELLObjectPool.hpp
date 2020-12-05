@@ -52,7 +52,7 @@ public:
 		result->nRef = 1;
 		_pHeader = _pHeader->pNext;
 
-		xPrintf("allocObject: size = %d, id = %d\n", nSize, result->nID);
+		printf("allocObject: size = %d, id = %d\n", nSize, result->nID);
 
 		return reinterpret_cast<char*>(result) + sizeof(NodeHeader);
 	}
@@ -65,7 +65,7 @@ public:
 		header->inPool = false;
 		header->pNext = nullptr;
 
-		xPrintf("Object Pool: allocOutOfPool\n");
+		//xPrintf("Object Pool: allocOutOfPool\n");
 
 		return reinterpret_cast<char*>(header) + sizeof(NodeHeader);
 	}

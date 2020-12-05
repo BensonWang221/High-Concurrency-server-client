@@ -19,7 +19,7 @@ $$HISTORY$$
 		#define xPrintf(...) printf(__VA_ARGS__)
 	#endif
 #else
-	#ifndef
+	#ifndef xPrintf
 		#define xPrintf
 	#endif
 #endif
