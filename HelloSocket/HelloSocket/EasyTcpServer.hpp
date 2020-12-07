@@ -157,8 +157,11 @@ public:
 		if (_sock == INVALID_SOCKET)
 			return;
 
-		closesocket(_sock);
+		for (auto cellServer : _cellServers)
+			delete cellServer;
 
+		closesocket(_sock);
+		_sock = INVALID_SOCKET;
 #ifdef _WIN32
 		WSACleanup();
 #endif
@@ -173,7 +176,7 @@ public:
 		for (int i = 0; i < threadCount; i++)
 		{
 			//auto cellServer = new CellServer(_sock, this);
-			_cellServers.push_back(new CellServer(_sock, this));
+			_cellServers.push_back(new CellServer(i, this));
 		}
 
 		for (auto& cellServer : _cellServers)
@@ -215,6 +218,7 @@ public:
 			size_t totalClientsNum = 0;
 			for (auto cellSer : _cellServers)
 				totalClientsNum += cellSer->GetClientsNum();
+
 			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %d\tmsgCount: %d\n", _sock, tSection, totalClientsNum, _recvCount.load(), _msgCount.load());
 			_recvCount = 0;
 			_msgCount = 0;

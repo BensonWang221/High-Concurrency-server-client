@@ -28,7 +28,11 @@
 #endif
 
 #ifndef CLIENT_HEART_DEAD_TIME
-#define CLIENT_HEART_DEAD_TIME 5000
+#define CLIENT_HEART_DEAD_TIME 60000
+#endif
+
+#ifndef CLIENT_SEND_CHECK_TIME
+#define CLIENT_SEND_CHECK_TIME 200
 #endif
 
 class Client;

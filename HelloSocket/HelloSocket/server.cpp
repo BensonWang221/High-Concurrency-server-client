@@ -11,6 +11,26 @@ $$HISTORY$$
 
 #include "EasyTcpServer.hpp"
 
+namespace
+{
+	bool g_run = true;
+}
+
+void cmdThread()
+{
+	char cmdBuf[256];
+	while (true)
+	{
+		std::cin.getline(cmdBuf, sizeof(cmdBuf));
+		if (strcmp(cmdBuf, "exit") == 0)
+		{
+			g_run = false;
+			printf("Exit from cmdThread...\n");
+			break;
+		}
+	}
+}
+
 class MyServer : public EasyTcpServer
 {
 public:
@@ -37,6 +57,7 @@ public:
 			LoginResult loginResult;
 			loginResult.result = 1;
 			client->SendData(&loginResult);
+			client->ResetDtHeart();
 			//auto result = new LoginResult;
 			//result->result = 1;
 			//cellServer->AddSendTask(client, static_cast<DataHeader*>(result));
@@ -78,12 +99,14 @@ int main()
 	server.Listen(3000);
 	server.Start(4);
 
-	while (true)
+	while (g_run)
 	{
 		server.OnRun();
 	}
 
 	server.Close();
+	printf("Server has closed...\n");
+
 	getchar();
 	return 0;
 }

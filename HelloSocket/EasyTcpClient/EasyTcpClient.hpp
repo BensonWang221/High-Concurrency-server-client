@@ -154,7 +154,7 @@ public:
 		recv(_sock, _recvBuf + sizeof(DataHeader), ((DataHeader*)_recvBuf)->dataLength - sizeof(DataHeader), 0);
 		OnNetMsg((DataHeader*)_recvBuf);*/
 
-		if ((cmdLen = recv(_sock, _msgBuf + _lastPos, RECVBUFSIZE * 5 - _lastPos, 0)) <= 0)
+		if ((cmdLen = recv(_sock, _msgBuf + _lastPos, RECVBUFSIZE - _lastPos, 0)) <= 0)
 		{
 			printf("Disconnect with server, going to close\n");
 			return -1;
@@ -212,7 +212,7 @@ public:
 	inline int SendData(DataHeader* header)
 	{
 		if (IsRunning() && header)
-			return send(_sock, (const char*)header, header->dataLength, 0);
+			return send(_sock, (const char*)header, header->dataLength * 10, 0);
 
 		return SOCKET_ERROR;
 	}

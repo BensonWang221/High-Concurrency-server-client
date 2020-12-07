@@ -2,6 +2,8 @@
    Date                        Description of Change
 06-Dec-2020           1. ①First version, 将各个类分开实现，优化代码结构
                          ②为每个客户端添加心跳检测heart check
+07-Dec-2020           1. 使用封装好的CELLThread来替代原有线程启动以及线程函数
+
 
 $$HISTORY$$
 ====================================================================================================*/
@@ -14,6 +16,7 @@ $$HISTORY$$
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include "Cell.h"
 #include "CELLClient.hpp"
 #include "INetEvent.hpp"
@@ -22,31 +25,16 @@ $$HISTORY$$
 class CellServer
 {
 public:
-	CellServer(SOCKET sock, INetEvent* event) : _sock(sock), _event(event)
+	CellServer(int id, INetEvent* event) : _id(id), _event(event)
 	{
 		FD_ZERO(&_readFds);
 	}
 
-	~CellServer()
-	{
-		//if (_sock != INVALID_SOCKET && !_clients.empty())
-		//{
-		//	for (auto& client : _clients)
-		//	{
-		//		delete client.second;
-		//		_sock = INVALID_SOCKET;
-		//	}
-		//}
-	}
-
-	void OnRun()
+	void OnRun(CELLThread* thread)
 	{
 		fd_set allset;
-		while (true)
+		while (thread->IsRunning())
 		{
-			if (!IsRunning())
-				return;
-
 			// 从_clientsBuf中取出所有可用的client
 			if (!_clientsBuf.empty())
 			{
@@ -65,6 +53,7 @@ public:
 			if (_clients.empty())
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				_heartCheckTime = CELLTime::GetCurrentTimeInMilliSec();
 				continue;
 			}
 
@@ -78,16 +67,21 @@ public:
 
 			if (ret < 0)
 			{
-				printf("Thread: select error\n");
-				Close();
-				return;
+				printf("CELLServer: select error\n");
+
+				thread->Exit();
+				// <07-Dec-2020>
+				// 注意现在OnRun和Close现在在同一个线程中，且Close需要OnRun结束后唤醒
+				// 在同一个线程中使用条件变量在执行中间调用wait后阻塞等待会导致死锁！！！
+				/*Close();
+				return;*/
 			}
 			//else if (ret == 0)
 			//	continue;
 			ReadData(allset);
 
 			// Heart check for every client
-			CheckHeartForClient();
+			CheckHeartAndSendForClient();
 		}
 	}
 
@@ -120,43 +114,68 @@ public:
 #endif 
 	}
 
-	void CheckHeartForClient()
+	void CheckHeartAndSendForClient()
 	{
 		auto currentTime = CELLTime::GetCurrentTimeInMilliSec();
+		auto dt = currentTime - _heartCheckTime;
 		for (auto iter = _clients.begin(); iter != _clients.end();)
 		{
-			if (iter->second->HeartCheck(currentTime - _heartCheckTime))
+			if (iter->second->HeartCheck(dt))
 			{
 				EraseClient(iter->second);
 				_clients.erase(iter++);
 			}
 
 			else
+			{
+				iter->second->CheckSendTime(dt);
 				iter++;
+			}
 		}
 		_heartCheckTime = currentTime;
 	}
 
-	inline void EraseClient(Client* client)
+	void EraseClient(Client* client)
 	{
 		_event->OnNetLeave(client);
 		FD_CLR(client->GetSockFd(), &_readFds);
 		delete client;
 	}
 
-	inline bool IsRunning()
-	{
-		return (_sock != INVALID_SOCKET);
-	}
-
 	void Start()
 	{
+		_taskServer.Start();
+
 		// std::mem_fun, 参数可以是对象指针或对象
-		_thread = std::thread(std::mem_fn(&CellServer::OnRun), this);
-		_thread.detach();
+		_thread.Start(nullptr, [this](CELLThread* thread)
+			{
+				this->OnRun(thread);
+			}, [this](CELLThread* thread)
+			{
+				this->ClearClients();
+			});
 	}
 
-	inline size_t GetClientsNum()
+	void ClearClients()
+	{
+		if (!_clients.empty())
+		{
+			for (auto& client : _clients)
+				delete client.second;
+
+			_clients.clear();
+		}
+
+		if (!_clientsBuf.empty())
+		{
+			for (auto client : _clientsBuf)
+				delete client;
+
+			_clientsBuf.clear();
+		}
+	}
+
+	size_t GetClientsNum()
 	{
 		return _clients.size() + _clientsBuf.size();
 	}
@@ -196,14 +215,10 @@ public:
 
 	void Close()
 	{
-		if (_sock == INVALID_SOCKET)
-			return;
+		_taskServer.Close();
+		_thread.Close();
 
-		// Close sockets
-		for (auto sock : _clients)
-			delete sock.second;
-
-		printf("Server<%d> Going to close..\n", (int)_sock);
+		printf("CellServer Going to close..\n");
 	}
 
 	void AddClient(Client* client)
@@ -211,6 +226,7 @@ public:
 		// 实际应用此处可以对client进行验证，是否为非法链接
 		std::lock_guard<std::mutex> lg(_mutex);
 		_clientsBuf.push_back(client);
+		_condVar.notify_one();
 	}
 
 	//void AddSendTask(Client* client, DataHeader* header)
@@ -224,23 +240,23 @@ public:
 	//}
 
 private:
-	SOCKET _sock = INVALID_SOCKET;
-	INetEvent* _event = nullptr;
-	SOCKET _maxFd = 0;
 	fd_set _readFds;
-	std::mutex _mutex;
-
-	time_t _heartCheckTime = CELLTime::GetCurrentTimeInMilliSec();
+	CELLThread _thread;
+		 
+	// 24-Nov-2020  由于FD_SET处经常根据socket查询Client*, 此处保存clients的容器由vector改为map，便于查询
+	std::map<SOCKET, Client*> _clients;
 
 	// 因为Client类较大，为防止直接存放Client对象导致栈空间不够，存放指针，每次Client的对象用new在堆空间分配
 	// 所以这里使用Client*
 	std::vector<Client*> _clientsBuf;
 
+	std::mutex _mutex;
+	std::condition_variable _condVar;
 	CellTaskServer _taskServer;
-
-	// 24-Nov-2020  由于FD_SET处经常根据socket查询Client*, 此处保存clients的容器由vector改为map，便于查询
-	std::map<SOCKET, Client*> _clients;
-	std::thread _thread;
+	INetEvent* _event = nullptr;
+	SOCKET _maxFd = 0;
+	time_t _heartCheckTime = CELLTime::GetCurrentTimeInMilliSec();
+	int _id = -1;
 };
 
 #endif

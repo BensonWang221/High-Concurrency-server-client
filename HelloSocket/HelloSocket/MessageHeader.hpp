@@ -7,6 +7,8 @@ enum CMD
 	CMD_LOGOUT,
 	CMD_LOGOUT_RESULT,
 	CMD_NEW_USER_JOIN,
+	CMD_C2S_HEART,
+	CMD_S2C_HEART,
 	CMD_ERROR
 };
 
@@ -51,6 +53,16 @@ struct NewUserJoin : public DataHeader
 {
 	NewUserJoin() : DataHeader(sizeof(NewUserJoin), CMD_NEW_USER_JOIN) {}
 	int sock;
+};
+
+struct HeartCheckC2S : public DataHeader
+{
+	HeartCheckC2S() : DataHeader(sizeof(HeartCheckC2S), CMD_C2S_HEART) {}
+};
+
+struct HeartCheckS2C : public DataHeader
+{
+	HeartCheckS2C() : DataHeader(sizeof(HeartCheckS2C), CMD_S2C_HEART) {}
 };
 
 #endif

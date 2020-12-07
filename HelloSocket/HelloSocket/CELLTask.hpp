@@ -3,6 +3,7 @@
 30-Nov-2020           1. ① First version
                          ② 设置Task类，用于分离send函数到独立线程中
 05-Dec-2020           1. 使用std::function来代替原有class
+07-Dec-2020           1. 使用封装好的CELLThread来替代原有线程启动以及线程函数
 $$HISTORY$$
 ====================================================================================================*/
 #ifndef _CELL_TASK_INCLUDED
@@ -15,29 +16,39 @@ $$HISTORY$$
 #include <functional>
 #include <memory>
 #include "CELLClient.hpp"
+#include "CELLThread.hpp"
 
 class CellTaskServer
 {
 	using CellTask = std::function<void()>;
 
 public:
-	inline void AddTask(CellTask task)
-	{
+	void AddTask(CellTask task)
+	{ 
 		std::lock_guard<std::mutex> lock(_mutex);
 		_tasksBuf.push_back(task);
 	}
 
 	void Start()
 	{
-		std::thread t(std::mem_fn(&CellTaskServer::OnRun), this);
-		t.detach();
+		_cellThread.Start(nullptr, [this](CELLThread* thread)
+			{
+				this->OnRun(thread);
+			}, nullptr);
+	}
+
+	void Close()
+	{
+		_cellThread.Close();
 	}
 
 protected:
 
-	void OnRun()
+	// 加入CellTaskServer含有两个CELLThread, 在判断IsRunning时如何分别是thread1还是thread2
+	// 就靠传入的参数thread来看是哪个CELLThread在调用这个函数了
+	void OnRun(CELLThread* thread)
 	{
-		while (true)
+		while (thread->IsRunning())
 		{
 			if (!_tasksBuf.empty())
 			{
@@ -67,6 +78,7 @@ private:
 	std::list<CellTask> _tasksList;
 	std::list<CellTask> _tasksBuf;
 	std::mutex _mutex;
+	CELLThread _cellThread;
 };
 
 

@@ -1,3 +1,11 @@
+/*==================================================================================================
+   Date                        Description of Change
+05-Dec-2020           1. ①First version 优化代码结构，分开实现Client
+06-Dec-2020           1. 在定量send的基础上加上定时send
+
+$$HISTORY$$
+====================================================================================================*/
+
 #ifndef _CELL_CLIENT_INCLUDED
 #define _CELL_CLIENT_INCLUDED
 
@@ -10,25 +18,28 @@ public:
 	virtual ~Client()
 	{
 		if (_sockFd != INVALID_SOCKET)
+		{
 			closesocket(_sockFd);
+			_sockFd = INVALID_SOCKET;
+		}
 	}
 
-	inline SOCKET GetSockFd() const
+	SOCKET GetSockFd() const
 	{
 		return _sockFd;
 	}
 
-	inline char* GetMsgBuf()
+	char* GetMsgBuf()
 	{
 		return _msgBuf;
 	}
 
-	inline SOCKET SetSockFd(const SOCKET sock)
+	SOCKET SetSockFd(const SOCKET sock)
 	{
 		return (_sockFd = sock);
 	}
 
-	inline size_t GetLastRecvPos() const
+	size_t GetLastRecvPos() const
 	{
 		return _lastRecvPos;
 	}
@@ -56,13 +67,15 @@ public:
 
 				if (ret == SOCKET_ERROR)
 				{
-					printf("Client<%d> has disconnected...\n");
+					//printf("Client<%d> has disconnected...\n");
 					return ret;
 				}
 				data += copyLen;
 				sendLen -= copyLen;
 				_lastSendPos = 0;
+				_dtSend = 0;
 			}
+
 			else
 			{
 				memcpy(_sendBuf + _lastSendPos, data, sendLen);
@@ -76,17 +89,17 @@ public:
 		return ret;
 	}
 
-	inline size_t GetLastSendPos() const
+	size_t GetLastSendPos() const
 	{
 		return _lastSendPos;
 	}
 
-	inline void SetLastSendPos(size_t pos)
+	void SetLastSendPos(size_t pos)
 	{
 		_lastSendPos = pos;
 	}
 
-	inline void ResetDtHeart()
+    void ResetDtHeart()
 	{
 		_dtHeart = 0;
 	}
@@ -103,6 +116,21 @@ public:
 		return false;
 	}
 
+	void CheckSendTime(time_t dt)
+	{
+		if ((_dtSend += dt) >= CLIENT_SEND_CHECK_TIME)
+		{
+			// 当时间超过设定时间并且发送缓冲区中有数据时，将缓冲区数据全部发出，并重置_dtSend
+			if (_lastSendPos > 0)
+			{	
+				if (send(_sockFd, _sendBuf, _lastSendPos, 0) < 0)
+					//printf("Client<%d> has disconnected...\n", _sockFd);
+				_lastSendPos = 0;
+			}
+			_dtSend = 0;
+		}
+	}
+
 private:
 	SOCKET _sockFd = INVALID_SOCKET; // client socket
 	size_t _lastRecvPos = 0;
@@ -110,6 +138,7 @@ private:
 
 	// 心跳计时
 	time_t _dtHeart = 0;
+	time_t _dtSend = 0;
 
 	char _msgBuf[RECVBUFSIZE] = { 0 };
 	char _sendBuf[SENDBUFSIZE] = { 0 };
