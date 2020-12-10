@@ -13,7 +13,7 @@ $$HISTORY$$
 
 namespace
 {
-	bool g_run = true;
+	CELLSemaphore g_sem;
 }
 
 void cmdThread()
@@ -24,7 +24,7 @@ void cmdThread()
 		std::cin.getline(cmdBuf, sizeof(cmdBuf));
 		if (strcmp(cmdBuf, "exit") == 0)
 		{
-			g_run = false;
+			g_sem.Wakeup();
 			printf("Exit from cmdThread...\n");
 			break;
 		}
@@ -56,7 +56,13 @@ public:
 
 			LoginResult loginResult;
 			loginResult.result = 1;
-			client->SendData(&loginResult);
+			
+			if (client->SendData(&loginResult) < 0)
+			{
+				// 消息缓冲区已满，消息未发送，做一些处理
+				printf("SendBuf full....\n");
+			}
+
 			client->ResetDtHeart();
 			//auto result = new LoginResult;
 			//result->result = 1;
@@ -97,12 +103,17 @@ int main()
 	//server.InitSocket();
 	server.Bind("192.168.0.109", 4567);
 	server.Listen(3000);
-	server.Start(4);
+	server.Start(1);
 
-	while (g_run)
+	std::thread t(cmdThread);
+	t.detach();
+
+	/*while (g_run)
 	{
 		server.OnRun();
-	}
+	}*/
+
+	g_sem.Wait();
 
 	server.Close();
 	printf("Server has closed...\n");

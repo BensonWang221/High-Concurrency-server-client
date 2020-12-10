@@ -1,10 +1,8 @@
 /*==================================================================================================
    Date                        Description of Change
 06-Dec-2020           1. ①First version, 将各个类分开实现，优化代码结构
-                         ②为每个客户端添加心跳检测heart check
+						 ②为每个客户端添加心跳检测heart check
 07-Dec-2020           1. 使用封装好的CELLThread来替代原有线程启动以及线程函数
-
-
 $$HISTORY$$
 ====================================================================================================*/
 
@@ -242,7 +240,7 @@ public:
 private:
 	fd_set _readFds;
 	CELLThread _thread;
-		 
+
 	// 24-Nov-2020  由于FD_SET处经常根据socket查询Client*, 此处保存clients的容器由vector改为map，便于查询
 	std::map<SOCKET, Client*> _clients;
 

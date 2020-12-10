@@ -2,6 +2,8 @@
    Date                        Description of Change
 07-Dec-2020           1. ① First version，封装thread,三个接口供用户设置线程任务
                             注意回调函数EventCall用this作为参数的作用
+08-Dec-2020           1. 修改线程无法退出的bug，_sem在wait前没有把锁unlock，形成死锁，
+                         解决办法，将_isrunning改为atomic, 或者在wait前调用unlock
 						
 $$HISTORY$$
 ====================================================================================================*/
@@ -11,6 +13,7 @@ $$HISTORY$$
 #include <thread>
 #include <mutex>
 #include <functional>
+#include <atomic>
 #include "CELLSemaphore.hpp"
 
 class CELLThread
@@ -63,12 +66,10 @@ public:
 	// 与OnWork同一个线程调用会造成死锁
 	void Close()
 	{
-		std::lock_guard<std::mutex> locker(_mutex);
-
 		if (_isRunning)
 		{
 			_isRunning = false;
-			
+		
 			// 等待工作线程执行完毕
 			_sem.Wait();
 		}
@@ -77,15 +78,12 @@ public:
 	// 在工作函数中退出应该调用此函数
 	void Exit()
 	{
-		std::lock_guard<std::mutex> locker(_mutex);
 		_isRunning = false;
 	}
 
 	bool IsRunning()
 	{
-		std::lock_guard<std::mutex> locker(_mutex);
-
-		return _isRunning;
+		return _isRunning.load();
 	}
 
 protected:
@@ -112,7 +110,7 @@ private:
 	EventCall _onDestroy = nullptr;
 	std::mutex _mutex;
 
-	bool _isRunning = false;
+	std::atomic_bool _isRunning = false;
 };
 
 #endif

@@ -2,19 +2,20 @@
    Date                        Description of Change
 05-Dec-2020           1. ①First version 优化代码结构，分开实现Client
 06-Dec-2020           1. 在定量send的基础上加上定时send
-
 $$HISTORY$$
 ====================================================================================================*/
 
 #ifndef _CELL_CLIENT_INCLUDED
 #define _CELL_CLIENT_INCLUDED
 
-#include "Cell.h"
+#include "CELLBuffer.hpp"
 
 // 客户端对象，包含缓冲区
 class Client
 {
 public:
+	//Client() : _sendBuf(SENDBUFSIZE) {}
+
 	virtual ~Client()
 	{
 		if (_sockFd != INVALID_SOCKET)
@@ -86,20 +87,15 @@ public:
 			}
 		} while (true);
 
+		//if (_sendBuf.Push(reinterpret_cast<const char*>(header), sendLen))
+		//{
+		//	ret = sendLen;
+		//}
+
 		return ret;
 	}
 
-	size_t GetLastSendPos() const
-	{
-		return _lastSendPos;
-	}
-
-	void SetLastSendPos(size_t pos)
-	{
-		_lastSendPos = pos;
-	}
-
-    void ResetDtHeart()
+	void ResetDtHeart()
 	{
 		_dtHeart = 0;
 	}
@@ -122,10 +118,10 @@ public:
 		{
 			// 当时间超过设定时间并且发送缓冲区中有数据时，将缓冲区数据全部发出，并重置_dtSend
 			if (_lastSendPos > 0)
-			{	
+			{
 				if (send(_sockFd, _sendBuf, _lastSendPos, 0) < 0)
 					//printf("Client<%d> has disconnected...\n", _sockFd);
-				_lastSendPos = 0;
+					_lastSendPos = 0;
 			}
 			_dtSend = 0;
 		}
@@ -139,7 +135,7 @@ private:
 	// 心跳计时
 	time_t _dtHeart = 0;
 	time_t _dtSend = 0;
-
+	//CELLBuffer _sendBuf;
 	char _msgBuf[RECVBUFSIZE] = { 0 };
 	char _sendBuf[SENDBUFSIZE] = { 0 };
 };

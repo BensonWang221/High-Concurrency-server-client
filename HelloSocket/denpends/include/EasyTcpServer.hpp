@@ -157,8 +157,13 @@ public:
 		if (_sock == INVALID_SOCKET)
 			return;
 
-		for (auto cellServer : _cellServers)
+		_thread.Close();
+
+		for (auto& cellServer : _cellServers)
+		{
+			cellServer->Close();
 			delete cellServer;
+		}
 
 		closesocket(_sock);
 		_sock = INVALID_SOCKET;
@@ -181,50 +186,11 @@ public:
 
 		for (auto& cellServer : _cellServers)
 			cellServer->Start();
-	}
 
-	void OnRun()
-	{
-		MsgPerSecond();
-
-		fd_set readFd;
-		FD_ZERO(&readFd);
-		FD_SET(_sock, &readFd);
-		timeval t{ 0, 0 };
-		int ret = select(_sock + 1, &readFd, nullptr, nullptr, &t);
-
-		if (ret < 0)
-		{
-			printf("select error\n");
-			Close();
-			return;
-		}
-
-		if (FD_ISSET(_sock, &readFd))
-		{
-			FD_CLR(_sock, &readFd);
-			Accept();
-		}
-//#endif              
-	}
-
-	void MsgPerSecond()
-	{
-		auto tSection = _cellTimer.GetElapsedTimeInSecond();
-
-		//每间隔1.0 ms 打印接收数量
-		if (tSection >= 1.0)
-		{
-			size_t totalClientsNum = 0;
-			for (auto cellSer : _cellServers)
-				totalClientsNum += cellSer->GetClientsNum();
-
-			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %d\tmsgCount: %d\n", _sock, tSection, totalClientsNum, _recvCount.load(), _msgCount.load());
-			_recvCount = 0;
-			_msgCount = 0;
-			_cellTimer.Update();
-		}
-
+		_thread.Start(nullptr, [this](CELLThread* thread)
+			{
+				this->OnRun(thread);
+			});
 	}
 
 	virtual void OnNetMsg(CellServer* cellServer, Client* client, DataHeader* header)
@@ -247,18 +213,61 @@ public:
 		_recvCount++;
 	}
 
-	bool IsRunning()
+protected:
+	void OnRun(CELLThread* thread)
 	{
-		return (_sock != INVALID_SOCKET);
+		while (thread->IsRunning())
+		{
+			MsgPerSecond();
+
+			fd_set readFd;
+			FD_ZERO(&readFd);
+			FD_SET(_sock, &readFd);
+			timeval t{ 0, 1 };
+			int ret = select(_sock + 1, &readFd, nullptr, nullptr, &t);
+
+			if (ret < 0)
+			{
+				printf("EasyTcpServer select error\n");
+				thread->Exit();
+				return;
+			}
+
+			if (FD_ISSET(_sock, &readFd))
+			{
+				FD_CLR(_sock, &readFd);
+				Accept();
+			}
+		}
+		//#endif              
 	}
 
-protected:
+	void MsgPerSecond()
+	{
+		auto tSection = _cellTimer.GetElapsedTimeInSecond();
+
+		//每间隔1.0 ms 打印接收数量
+		if (tSection >= 1.0)
+		{
+			size_t totalClientsNum = 0;
+			for (auto cellSer : _cellServers)
+				totalClientsNum += cellSer->GetClientsNum();
+
+			printf("server<%d>: tSection: %lf\tclients<%u>recvCount: %d\tmsgCount: %d\n", _sock, tSection, totalClientsNum, _recvCount.load(), _msgCount.load());
+			_recvCount = 0;
+			_msgCount = 0;
+			_cellTimer.Update();
+		}
+
+	}
+
 	std::atomic_int _recvCount = 0;
 	SOCKET _sock = INVALID_SOCKET;
 
 private:
 	std::atomic_int _msgCount = 0;
 	std::atomic_int _clientsCount = 0;
+	CELLThread _thread;
 
 	CELLTimestamp _cellTimer;
 	std::vector<CellServer*> _cellServers;
